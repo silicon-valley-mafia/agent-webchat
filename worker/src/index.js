@@ -14,14 +14,24 @@
  *   /export      {conversationId} -> {markdown, filename}  (no write; works without logging)
  *   /history     -> {items:[{path,date,time,person,messages}]}  (admins see everyone, others only their own)
  *   /transcript  {path: session folder} -> {markdown}  (one GraphQL call reads every file in the folder)
- *   GET /health  -> {ok, configured, logging, people}
+ *   /artifact    {op:"begin", conversationId, name, size} -> {uploadId, folder, partBytes, parts, names}
+ *                {op:"manifest", conversationId, uploadId, name, size, type, sha256, parts:[{bytes,sha256,ok}]}
+ *                   -> creates <folder>/MANIFEST.md in ARTIFACT_REPO
+ *   /artifact/put?conversationId&uploadId&name&i&n  body {"message","content":<base64>} streamed to GitHub
+ *                   -> creates <folder>/<name>[.partIIofNN]   (create-only, like the logs)
+ *   GET /health  -> {ok, configured, logging, artifacts, people}
  *
  * Secrets: DIRECTLINE_SECRET; ACCESS_CODE (owner, admin) and/or ACCESS_CODES (JSON:
- *   {"code": "Name"} or {"code": {"name": "Name", "admin": true}}); LOG_REPO_TOKEN (optional).
+ *   {"code": "Name"} or {"code": {"name": "Name", "admin": true}}); LOG_REPO_TOKEN (optional);
+ *   ARTIFACT_REPO_TOKEN (optional, defaults to LOG_REPO_TOKEN). Vars: ARTIFACT_REPO, ARTIFACT_PART_BYTES,
+ *   ARTIFACT_MAX_BYTES.
  * Vars: ALLOWED_ORIGINS, DIRECTLINE_DOMAIN, RATE_LIMIT_PER_MIN (token/resume, 10),
  *   API_RATE_LIMIT_PER_MIN (log/export/history/transcript, 60), LOG_REPO, LOG_BRANCH (main),
  *   LOG_TZ_OFFSET_MIN (330 = IST), OWNER_NAME (name for ACCESS_CODE, default "Owner").
  */
+
+import { handleArtifact, handleArtifactPut, artifactsEnabled } from "./artifacts.js";
+export * from "./artifacts.js";
 
 const buckets = new Map(); // best-effort, per-isolate rate limiter
 
@@ -104,7 +114,7 @@ function corsHeaders(origin) {
   };
 }
 
-function json(body, status, origin) {
+export function json(body, status, origin) {
   return new Response(JSON.stringify(body), {
     status,
     headers: { "Content-Type": "application/json", "Cache-Control": "no-store", ...(origin ? corsHeaders(origin) : {}) },
@@ -115,7 +125,7 @@ function dlDomain(env) {
   return (env.DIRECTLINE_DOMAIN || "https://directline.botframework.com").replace(/\/$/, "");
 }
 
-const CONV_RE = /^[A-Za-z0-9._|:-]{4,200}$/;
+export const CONV_RE = /^[A-Za-z0-9._|:-]{4,200}$/;
 const USER_RE = /^dl_[A-Za-z0-9_-]{1,80}$/;
 /** A session folder: logs/<day>/<HHMM>-<person>--<conversation> */
 export const SESSION_RE = /^logs\/(\d{4}-\d{2}-\d{2})\/(\d{4})-([a-z0-9-]{1,24})--([A-Za-z0-9_-]{1,80})$/;
@@ -131,7 +141,7 @@ export function b64utf8(str) {
   return btoa(bin);
 }
 
-function localParts(iso, offsetMin) {
+export function localParts(iso, offsetMin) {
   const t = Date.parse(iso);
   const s = new Date((Number.isFinite(t) ? t : Date.now()) + offsetMin * 60000).toISOString();
   return { date: s.slice(0, 10), time: s.slice(11, 19), hm: s.slice(11, 16).replace(":", "") };
@@ -268,9 +278,9 @@ async function fetchActivities(env, conversationId) {
   return all;
 }
 
-function ghHeaders(env, accept) {
+export function ghHeaders(env, accept, token) {
   return {
-    Authorization: "Bearer " + env.LOG_REPO_TOKEN,
+    Authorization: "Bearer " + (token || env.LOG_REPO_TOKEN),
     Accept: accept || "application/vnd.github+json",
     "X-GitHub-Api-Version": "2022-11-28",
     "User-Agent": "agent-webchat-logger",
@@ -278,8 +288,8 @@ function ghHeaders(env, accept) {
   };
 }
 
-function contentsUrl(env, path) {
-  return "https://api.github.com/repos/" + env.LOG_REPO + "/contents/" + path.split("/").map(encodeURIComponent).join("/");
+export function contentsUrl(env, path, repo) {
+  return "https://api.github.com/repos/" + (repo || env.LOG_REPO) + "/contents/" + path.split("/").map(encodeURIComponent).join("/");
 }
 
 /**
@@ -287,13 +297,15 @@ function contentsUrl(env, path) {
  * GitHub answers 422 when the path already exists, which counts as "already written".
  * 409 (branch moved under us by a parallel write) is retried.
  */
-export async function createOnly(env, path, content, message, budget) {
-  const url = contentsUrl(env, path);
-  const body = JSON.stringify({ message, content: b64utf8(content), branch: env.LOG_BRANCH || "main" });
+export async function createOnly(env, path, content, message, budget, target) {
+  const url = contentsUrl(env, path, target && target.repo);
+  const req = { message, content: b64utf8(content) };
+  if (!target) req.branch = env.LOG_BRANCH || "main"; // artifact repo: default branch
+  const body = JSON.stringify(req);
   for (let attempt = 0; attempt < 3; attempt++) {
     if (budget.left <= 0) return { error: "budget" };
     budget.left--;
-    const p = await fetch(url, { method: "PUT", headers: ghHeaders(env), body });
+    const p = await fetch(url, { method: "PUT", headers: ghHeaders(env, null, target && target.token), body });
     if (p.ok) return { created: true };
     if (p.status === 422) return { exists: true };
     if (p.status !== 409) return { error: "github_write_" + p.status };
@@ -503,6 +515,8 @@ const ROUTES = {
   "/export": { bucket: "api" },
   "/history": { bucket: "api" },
   "/transcript": { bucket: "api" },
+  "/artifact": { bucket: "api" },
+  "/artifact/put": { bucket: "api" },
 };
 
 export default {
@@ -518,6 +532,7 @@ export default {
           ok: true,
           configured: Boolean(env.DIRECTLINE_SECRET && people(env).length),
           logging: Boolean(env.LOG_REPO && env.LOG_REPO_TOKEN),
+          artifacts: artifactsEnabled(env),
           people: people(env).length,
         },
         200,
@@ -543,8 +558,11 @@ export default {
       return json({ error: "bad_access_code" }, 401, origin);
     }
 
+    if (url.pathname === "/artifact/put") return handleArtifactPut(request, env, origin, person, url);
     const body = url.pathname === "/token" || url.pathname === "/history" ? {} : await readJson(request);
     switch (url.pathname) {
+      case "/artifact":
+        return handleArtifact(env, origin, person, body);
       case "/token":
         return handleToken(env, origin, person);
       case "/resume":

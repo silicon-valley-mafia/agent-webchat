@@ -1,81 +1,75 @@
 # agent-webchat
 
-A web chat page for the Copilot Studio agent `nauto22_githubagent_Zlk0_w`, hosted on GitHub Pages. It connects to the agent over **Direct Line** (no Microsoft sign-in), behind an access code, and can save every conversation to the private repo `silicon-valley-mafia/agent-webchat-logs`.
+A web chat for the Copilot Studio agent `nauto22_githubagent_Zlk0_w`, hosted on GitHub Pages at
+**https://silicon-valley-mafia.github.io/agent-webchat/**. It talks to the agent over **Direct Line** (no Microsoft sign-in), sits behind
+per-person access codes, and saves every conversation to the private repo `silicon-valley-mafia/agent-webchat-logs`.
 
 ```
-Browser (GitHub Pages: web/)
-  │ 1. POST /token  (header X-Access-Code)
-  ▼
-Cloudflare Worker (worker/)      ← holds DIRECTLINE_SECRET + GITHUB_LOG_TOKEN, never sent to the browser
-  │ 2. POST {DIRECTLINE_DOMAIN}/v3/directline/tokens/generate  (Authorization: Bearer <secret>)
-  ▼
-  3. returns a single-conversation token
-Browser ── 4. Bot Framework Web Chat talks to Direct Line with that token ──▶ agent
-Browser ── 5. POST /log {conversationId}, 4 s after each message ──▶ Worker
-           Worker reads the conversation from Direct Line itself and writes
-           logs/YYYY-MM-DD/HHMM-<conversationId>.md (IST) to the private log repo
+Browser (GitHub Pages: web/)  ──POST /token, /resume, /log, /export, /history, /transcript──▶  Cloudflare Worker (worker/)
+                                                                     holds DIRECTLINE_SECRET, ACCESS_CODE(S), GITHUB_LOG_TOKEN
+Browser ── Bot Framework Web Chat ⇄ Direct Line (single-conversation token) ⇄ agent
+Worker  ── reads conversations from Direct Line, writes logs/YYYY-MM-DD/HHMM-<person>--<conversation>.md ──▶ private log repo
 ```
 
-The Worker answers `/token` and `/log` only when all of these pass:
-1. **The request comes from an allowed origin** (`ALLOWED_ORIGINS`; plain curl requests are rejected).
-2. **The access code matches** `ACCESS_CODE`. The comparison is constant-time.
-3. **The per-IP rate limit isn't exceeded**: `/token` 10/min, `/log` 30/min. Wrong guesses on either endpoint count against the `/token` limit.
+## Features
+| Feature | How it works |
+|---|---|
+| **Access codes, per person** | `ACCESS_CODE` = owner (admin, named `OWNER_NAME`). `ACCESS_CODES` adds more people. The code is typed once and remembered in the browser. **Forget code** removes it. |
+| **Continue after refresh** | Reopening the page re-attaches to your last conversation (if it's under 24 h old) through `/resume`. The Worker calls Direct Line *reconnect* with the secret. The chat polls once, so the earlier messages replay. If Microsoft has already expired the conversation, a new chat starts and the old one stays in History. |
+| **History** | Lists saved transcripts, newest first. Admins see everyone; other people see only their own. **View** renders the transcript, **Continue** re-attaches to that conversation, and **⬇** downloads it. |
+| **Download** | **⬇ Download** saves the current chat as Markdown. The Worker renders it from Direct Line, so this works even with logging off. |
+| **Transcript logging** | 4 s after each message (and on New chat or tab hide), the Worker re-reads the conversation from Direct Line and upserts one file per conversation. Unchanged files aren't re-committed; write conflicts are retried. |
+| **File uploads** | Paperclip button, multiple files. Logs record name, type and Direct Line URL (these URLs expire), not the file bytes. |
+| **Dark mode** | 🌓 button cycles auto → light → dark (saved per browser). Switching re-attaches the open chat in the new theme. |
+| **Avatars & colours** | `accentColor`, `botAvatarInitials`, `botAvatarImage`, `userAvatarImage` in `web/config.js`. User initials default to the person's name. |
+| **Voice input** | Microphone button where the browser supports speech recognition (Chrome, Edge). Set `voice: false` to hide it. |
+| **Notifications** | 🔔 button. When the agent replies while the tab is in the background, you get a desktop notification and the tab title shows an unread count. |
 
-> ⚠️ **Security:** the agent runs with **No authentication**, so anyone who gets the
-> access code can use the agent, including its GitHub write tools. Keep the code
-> private and rotate it if it leaks. Keep **Require secured access** ON in Copilot Studio,
-> otherwise anyone who knows the agent ID can bypass this page (and the access code) entirely.
+### Adding people
+Add a repo secret **`ACCESS_CODES`** containing a JSON object, then run **Token Worker - test and deploy**:
+```json
+{ "mango-river-7421": "Ravi", "blue-kite-0815": { "name": "Asha", "admin": true } }
+```
+- The workflow validates the JSON before uploading it and fails with a clear message if it's malformed.
+- Each person's name goes into the Direct Line user, the transcript header and the log file name.
+- To remove someone, delete their entry and re-run the workflow.
 
-## Page features
-- Access code typed once, remembered in the browser (**Forget code** removes it).
-- **New chat** starts a fresh conversation; the previous one is closed and its transcript flushed.
-- File uploads (multiple files) through the paperclip button.
-- Transcript status in the header: `Saving…` / `Saved ✓` / `Not saved` (blank if logging is off).
+## Security
+- Every POST endpoint needs an allowed `Origin`, a valid access code, and stays under a per-IP rate limit:
+  - `/token` and `/resume`: 10/min
+  - all other endpoints: 60/min
+  - wrong codes on any endpoint count against the 10/min limit
+- Codes are compared in constant time across *all* configured codes.
+- Transcript paths are validated against a strict pattern, so there is no path traversal. Non-admins can't read other people's logs.
+- ⚠️ The agent runs with **No authentication**: whoever holds a code can use the agent's GitHub write tools.
+- Keep **Require secured access** ON in Copilot Studio (Settings → Security → Web channel security). Otherwise anyone who knows the agent ID can skip this page entirely.
 
-## Transcript logging (optional)
-- Transcripts are **read server-side from Direct Line** (with the secret), so the log contains exactly what the agent saw and said. They are not copied from the browser.
-- Each conversation is one Markdown file, updated in place as the chat goes on. Unchanged transcripts are not re-committed.
-- Uploaded files are recorded by name, type and Direct Line URL (those URLs expire); the file bytes are not stored.
-- Typing indicators and the start event are omitted. Adaptive cards are kept as JSON.
+## Setup
+1. **Copilot Studio:** set **Authentication: No authentication** and Publish. Under **Web channel security**, copy Secret 1 and turn **Require secured access** ON.
+2. **Repo secrets** (Settings → Secrets and variables → Actions):
+   - `CLOUDFLARE_API_TOKEN` (template "Edit Cloudflare Workers")
+   - `CLOUDFLARE_ACCOUNT_ID`
+   - `DIRECTLINE_SECRET`
+   - `ACCESS_CODE`
+   - optional: `ACCESS_CODES`
+   - optional: `GITHUB_LOG_TOKEN`, a fine-grained PAT with only `agent-webchat-logs` selected and **Contents: Read and write**
+3. **Actions → Token Worker - test and deploy → Run workflow.** Then check
+   `https://agent-webchat-token.deepeshj-2k6.workers.dev/health`, which should show `{"ok":true,"configured":true,"logging":true,"people":N}`.
+4. **Settings → Pages → Source: GitHub Actions.** The token endpoint is set in `web/config.js`.
 
-To enable it:
-1. Create a **fine-grained personal access token** (GitHub → Settings → Developer settings → Fine-grained tokens):
-   - Repository access: **Only select repositories → `agent-webchat-logs`**
-   - Permissions: **Contents → Read and write** (Metadata read-only is added automatically)
-2. Add it to this repo as the Actions secret **`GITHUB_LOG_TOKEN`**.
-3. Run **Token Worker - test and deploy** (Actions → Run workflow). `/health` then shows `"logging":true`.
-
-## One-time setup
-
-### 1. Copilot Studio (agent side)
-1. **Settings → Security → Authentication → No authentication**, then **Publish**.
-   (With "Authenticate with Microsoft" the agent replies "You don't have access to talk to this bot".)
-2. **Settings → Security → Web channel security**: copy **Secret 1**, and turn **Require secured access** ON (takes up to 2 hours).
-3. If the agent is in a regional environment and token generation returns 403,
-   set `DIRECTLINE_DOMAIN` in `worker/wrangler.toml` to the regional host.
-
-### 2. Token Worker (Cloudflare free plan)
-Add the repo secrets `CLOUDFLARE_API_TOKEN` (template "Edit Cloudflare Workers"), `CLOUDFLARE_ACCOUNT_ID`,
-`DIRECTLINE_SECRET`, `ACCESS_CODE` (and optionally `GITHUB_LOG_TOKEN`), then run **Token Worker - test and deploy**.
-Check `https://agent-webchat-token.deepeshj-2k6.workers.dev/health`.
-
-### 3. GitHub Pages
-**Settings → Pages → Source: GitHub Actions**. The token endpoint is set in `web/config.js`.
-The site is `https://silicon-valley-mafia.github.io/agent-webchat/`.
-
-> Use **Run workflow** (not *Re-run* on an old run): re-running an old run redeploys that old commit.
+> Use **Run workflow**, not *Re-run* on an old run. Re-running an old run redeploys that old commit.
 
 ## Tests
 ```bash
-cd worker && node --test test/token.test.js test/log.test.js   # 28 tests, no network needed
+cd worker && node --test test/token.test.js test/log.test.js test/features.test.js   # 51 tests, no network
 ```
 
 ## Files
 | Path | Purpose |
 |---|---|
-| `web/index.html` | Access-code gate, Bot Framework Web Chat, transcript auto-save |
-| `web/config.js` | Public configuration (token endpoint URL), no secrets |
-| `worker/src/index.js` | Token broker + transcript logger |
-| `worker/test/*.test.js` | Origin, access code, rate limits, logging, conflicts, path-injection, secret non-leakage |
+| `web/index.html`, `web/app.css`, `web/app.js` | Page shell, styles (light and dark), client logic |
+| `web/config.js` | Public settings: endpoint, look, features. No secrets |
+| `worker/src/index.js` | Token broker, resume, logging, export, history, transcripts, per-person codes |
+| `worker/test/*.test.js` | 51 tests: auth, rate limits, logging, conflicts, history ACL, path validation, resume, secret non-leakage |
 | `.github/workflows/pages.yml` | Deploys `web/` to Pages |
-| `.github/workflows/worker.yml` | Tests the Worker and deploys it (and the log token, if set) |
+| `.github/workflows/worker.yml` | Tests and deploys the Worker, plus the optional secrets when present |

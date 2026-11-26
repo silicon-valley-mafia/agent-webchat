@@ -5,12 +5,15 @@ compatibility_date = "2025-01-01"
 [vars]
 ALLOWED_ORIGINS = "https://silicon-valley-mafia.github.io"
 DIRECTLINE_DOMAIN = "https://directline.botframework.com"
-RATE_LIMIT_PER_MIN = "10"
-LOG_RATE_LIMIT_PER_MIN = "30"
+RATE_LIMIT_PER_MIN = "10"        # /token and /resume, per IP
+API_RATE_LIMIT_PER_MIN = "60"    # /log /export /history /transcript, per IP
 LOG_REPO = "silicon-valley-mafia/agent-webchat-logs"
-LOG_TZ_OFFSET_MIN = "330"   # transcripts use IST (UTC+05:30)
+LOG_BRANCH = "main"
+LOG_TZ_OFFSET_MIN = "330"        # transcripts use IST (UTC+05:30)
+OWNER_NAME = "Deepesh"           # name recorded for ACCESS_CODE (admin)
 
 # Secrets - NEVER put them in this file. Set them with:
 #   npx wrangler secret put DIRECTLINE_SECRET
-#   npx wrangler secret put ACCESS_CODE
-#   npx wrangler secret put GITHUB_LOG_TOKEN   (optional - enables transcript logging)
+#   npx wrangler secret put ACCESS_CODE        (owner, admin)
+#   npx wrangler secret put ACCESS_CODES       (optional JSON: {"code":"Name"} or {"code":{"name":"Name","admin":true}})
+#   npx wrangler secret put LOG_REPO_TOKEN   (optional - enables transcript logging + history)

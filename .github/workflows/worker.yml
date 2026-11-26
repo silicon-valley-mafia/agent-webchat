@@ -5,7 +5,7 @@ on:
     branches: [main]
     paths: ["worker/**", ".github/workflows/worker.yml"]
   pull_request:
-    paths: ["worker/**"]
+    paths: ["worker/**", ".github/workflows/worker.yml"]
   workflow_dispatch:
 
 permissions:
@@ -22,7 +22,7 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 22
-      - run: node --test test/token.test.js test/log.test.js
+      - run: node --test test/token.test.js test/log.test.js test/features.test.js
 
   deploy:
     needs: test
@@ -30,7 +30,8 @@ jobs:
     runs-on: ubuntu-latest
     env:
       CF_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-      HAS_LOG_TOKEN: ${{ secrets.GITHUB_LOG_TOKEN != '' }}
+      HAS_LOG_TOKEN: ${{ secrets.LOG_REPO_TOKEN != '' }}
+      HAS_ACCESS_CODES: ${{ secrets.ACCESS_CODES != '' }}
     steps:
       - uses: actions/checkout@v4
       - name: Skip notice
@@ -49,15 +50,27 @@ jobs:
         env:
           DIRECTLINE_SECRET: ${{ secrets.DIRECTLINE_SECRET }}
           ACCESS_CODE: ${{ secrets.ACCESS_CODE }}
-      # Optional: transcript logging. Only runs when the GITHUB_LOG_TOKEN repo secret exists.
+      # Optional secrets: only uploaded when the matching repo secret exists.
       - name: Set transcript logging token
         if: env.CF_TOKEN != '' && env.HAS_LOG_TOKEN == 'true'
         working-directory: worker
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-          GITHUB_LOG_TOKEN: ${{ secrets.GITHUB_LOG_TOKEN }}
-        run: printf '%s' "$GITHUB_LOG_TOKEN" | npx --yes wrangler@3 secret put GITHUB_LOG_TOKEN
-      - name: Logging status
-        if: env.CF_TOKEN != '' && env.HAS_LOG_TOKEN != 'true'
-        run: echo "GITHUB_LOG_TOKEN secret not set - transcript logging stays disabled."
+          LOG_REPO_TOKEN: ${{ secrets.LOG_REPO_TOKEN }}
+        run: printf '%s' "$LOG_REPO_TOKEN" | npx --yes wrangler@3 secret put LOG_REPO_TOKEN
+      - name: Set per-person access codes
+        if: env.CF_TOKEN != '' && env.HAS_ACCESS_CODES == 'true'
+        working-directory: worker
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          ACCESS_CODES: ${{ secrets.ACCESS_CODES }}
+        run: |
+          printf '%s' "$ACCESS_CODES" | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{try{const o=JSON.parse(s);if(!o||typeof o!=="object"||Array.isArray(o))throw 0;console.log("ACCESS_CODES OK: "+Object.keys(o).length+" people")}catch(e){console.error("ACCESS_CODES is not a JSON object like {\"code\":\"Name\"}");process.exit(1)}})'
+          printf '%s' "$ACCESS_CODES" | npx --yes wrangler@3 secret put ACCESS_CODES
+      - name: Optional features status
+        if: env.CF_TOKEN != ''
+        run: |
+          echo "Transcript logging: ${{ env.HAS_LOG_TOKEN == 'true' && 'ON' || 'off (add LOG_REPO_TOKEN)' }}"
+          echo "Per-person codes:   ${{ env.HAS_ACCESS_CODES == 'true' && 'ON' || 'off (add ACCESS_CODES)' }}"

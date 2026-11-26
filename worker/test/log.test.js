@@ -8,7 +8,8 @@ const env = {
   DIRECTLINE_SECRET: "test-secret",
   ACCESS_CODE: "open-sesame",
   LOG_REPO: "silicon-valley-mafia/agent-webchat-logs",
-  GITHUB_LOG_TOKEN: "gh-token",
+  LOG_REPO_TOKEN: "gh-token",
+  OWNER_NAME: "Deepesh",
 };
 
 const ACTS = [
@@ -69,31 +70,33 @@ test("log: reads conversation with the SECRET and creates the file", async () =>
   const j = await res.json();
   assert.equal(j.logged, true);
   assert.equal(j.changed, true);
-  assert.equal(j.path, "logs/2026-11-27/0140-Conv-123-in.md"); // 20:10Z = 01:40 IST next day
+  assert.equal(j.path, "logs/2026-11-27/0140-deepesh--Conv-123-in.md"); // 20:10Z = 01:40 IST next day
   const dl = calls.filter((c) => c.url.includes("directline"));
   assert.equal(dl[0].init.headers.Authorization, "Bearer test-secret");
   assert.equal(gh.puts.length, 1);
   assert.equal(gh.puts[0].sha, undefined);
   const ghCall = calls.find((c) => c.url.startsWith("https://api.github.com/"));
   assert.equal(ghCall.init.headers.Authorization, "Bearer gh-token");
-  assert.match(ghCall.url, /repos\/silicon-valley-mafia\/agent-webchat-logs\/contents\/logs\/2026-11-27\/0140-Conv-123-in\.md$/);
+  assert.match(ghCall.url, /repos\/silicon-valley-mafia\/agent-webchat-logs\/contents\/logs\/2026-11-27\/0140-deepesh--Conv-123-in\.md$/);
 });
 
 test("log: transcript content is correct and UTF-8 safe", async () => {
   await worker.fetch(req({ conversationId: "Conv-123-in" }), env);
   const md = new TextDecoder().decode(Uint8Array.from(atob(gh.puts[0].content), (c) => c.charCodeAt(0)));
-  assert.match(md, /🧑 You · 01:40:05\n\nhi/);
+  assert.match(md, /🧑 Deepesh · 01:40:05\n\nhi/);
+  assert.match(md, /\| Person \| Deepesh \|/);
+  assert.match(md, /\| User ID \| `dl_abc` \|/);
   assert.match(md, /🤖 GitHub Agent · 01:40:09\n\nHello! नमस्ते/);
   assert.match(md, /adaptive card/);
   assert.match(md, /Suggested: List repos/);
   assert.match(md, /📎 \*\*spec\.pdf\*\* \(application\/pdf\) https:\/\/dl\.example\/att\/1/);
-  assert.match(md, /Messages \| 3 \(you: 2, agent: 1\)/);
+  assert.match(md, /Messages \| 3 \(Deepesh: 2, agent: 1\)/);
   assert.ok(!md.includes("typing"));
   assert.ok(!md.includes("startConversation"));
 });
 
 test("log: existing identical file -> no commit", async () => {
-  const md = renderTranscript("Conv-123-in", ACTS, 330);
+  const md = renderTranscript("Conv-123-in", ACTS, 330, { name: "Deepesh", slug: "deepesh" });
   const b64 = b64utf8(md).replace(/(.{60})/g, "$1\n"); // GitHub wraps base64
   mockFetch({ getStatus: 200, existing: b64 });
   const j = await (await worker.fetch(req({ conversationId: "Conv-123-in" }), env)).json();
@@ -129,7 +132,7 @@ test("log: github auth failure surfaces status", async () => {
 });
 
 test("log: disabled when no token configured (page keeps working)", async () => {
-  const res = await worker.fetch(req({ conversationId: "Conv-123-in" }), { ...env, GITHUB_LOG_TOKEN: undefined });
+  const res = await worker.fetch(req({ conversationId: "Conv-123-in" }), { ...env, LOG_REPO_TOKEN: undefined });
   assert.equal(res.status, 200);
   assert.deepEqual(await res.json(), { logged: false, reason: "logging_disabled" });
   assert.equal(calls.length, 0);
@@ -172,10 +175,10 @@ test("log: Direct Line failure -> 502", async () => {
 });
 
 test("log path sanitises ids and uses first activity time", () => {
-  assert.equal(logPath("A|b:c.d", ACTS, 0), "logs/2026-11-26/2010-A_b_c_d.md");
+  assert.equal(logPath("A|b:c.d", ACTS, 0, "bob"), "logs/2026-11-26/2010-bob--A_b_c_d.md");
 });
 
 test("health reports logging flag", async () => {
   const h = await worker.fetch(new Request("https://w.example/health"), env);
-  assert.deepEqual(await h.json(), { ok: true, configured: true, logging: true });
+  assert.deepEqual(await h.json(), { ok: true, configured: true, logging: true, people: 1 });
 });

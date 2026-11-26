@@ -11,7 +11,7 @@ LOG_REPO = "silicon-valley-mafia/agent-webchat-logs"
 LOG_BRANCH = "main"
 LOG_TZ_OFFSET_MIN = "330"        # transcripts use IST (UTC+05:30)
 OWNER_NAME = "Deepesh"           # name recorded for ACCESS_CODE (admin)
-ARTIFACT_REPO = "silicon-valley-mafia/artifacts-10"   # every attached file is committed here
+ARTIFACT_REPO = "silicon-valley-mafia/agent-webchat-artifcats-1"   # every attached file is committed here
 ARTIFACT_PART_BYTES = "73400320" # 70 MiB per committed part (Cloudflare 100 MB body cap after base64)
 ARTIFACT_MAX_BYTES = "1073741824" # 1 GiB largest single attachment
 

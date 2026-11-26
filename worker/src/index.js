@@ -6,11 +6,14 @@
  *
  *   /token       -> new conversation token                         {token, conversationId, userId, domain, name, admin}
  *   /resume      {conversationId} -> fresh token for an existing conversation (Direct Line reconnect)
- *   /log         {conversationId} -> Worker reads the conversation from Direct Line and upserts
- *                   logs/YYYY-MM-DD/HHMM-<person>--<conversation>.md in LOG_REPO
+ *   /log         {conversationId, userId?, since?} -> Worker reads the conversation from Direct Line and
+ *                   CREATES files in a per-session folder (never updates or deletes anything):
+ *                     logs/YYYY-MM-DD/HHMM-<person>--<conversation>/0000-session.md
+ *                     logs/YYYY-MM-DD/HHMM-<person>--<conversation>/0001-HHMMSS-user.md, 0002-...-agent.md, ...
+ *                   Returns {total} = messages written so far; the client sends it back as `since`.
  *   /export      {conversationId} -> {markdown, filename}  (no write; works without logging)
- *   /history     -> {items:[{path,date,time,person}]}  (admins see everyone, others only their own)
- *   /transcript  {path} -> {markdown}
+ *   /history     -> {items:[{path,date,time,person,messages}]}  (admins see everyone, others only their own)
+ *   /transcript  {path: session folder} -> {markdown}  (one GraphQL call reads every file in the folder)
  *   GET /health  -> {ok, configured, logging, people}
  *
  * Secrets: DIRECTLINE_SECRET; ACCESS_CODE (owner, admin) and/or ACCESS_CODES (JSON:
@@ -113,7 +116,11 @@ function dlDomain(env) {
 }
 
 const CONV_RE = /^[A-Za-z0-9._|:-]{4,200}$/;
-export const PATH_RE = /^logs\/(\d{4}-\d{2}-\d{2})\/(\d{4})-([a-z0-9-]{1,24})--([A-Za-z0-9_-]{1,80})\.md$/;
+const USER_RE = /^dl_[A-Za-z0-9_-]{1,80}$/;
+/** A session folder: logs/<day>/<HHMM>-<person>--<conversation> */
+export const SESSION_RE = /^logs\/(\d{4}-\d{2}-\d{2})\/(\d{4})-([a-z0-9-]{1,24})--([A-Za-z0-9_-]{1,80})$/;
+/** Cloudflare Workers Free allows 50 subrequests per request; keep headroom for Direct Line reads. */
+export const WRITE_BUDGET = 40;
 
 // ---------- transcript helpers ----------
 
@@ -190,10 +197,48 @@ export function renderTranscript(conversationId, activities, offsetMin, person) 
   return out.join("\n");
 }
 
+/** Name used by /export downloads: one Markdown file for the whole conversation. */
 export function logPath(conversationId, activities, offsetMin, slug) {
+  return sessionFolder(conversationId, activities, offsetMin, slug) + ".md";
+}
+
+/** logs/<day>/<HHMM>-<person>--<conversation>, dated by the conversation's first activity. */
+export function sessionFolder(conversationId, activities, offsetMin, slug) {
   const p = localParts((activities[0] && activities[0].timestamp) || new Date().toISOString(), offsetMin);
   const safe = conversationId.replace(/[^A-Za-z0-9_-]/g, "_").slice(0, 80);
-  return "logs/" + p.date + "/" + p.hm + "-" + (slug || "user") + "--" + safe + ".md";
+  return "logs/" + p.date + "/" + p.hm + "-" + (slug || "user") + "--" + safe;
+}
+
+/** 0000-session.md: written once, never changed. */
+export function sessionHeader(conversationId, activities, offsetMin, person, userId) {
+  const label = tzLabel(offsetMin);
+  const first = localParts((activities[0] && activities[0].timestamp) || new Date().toISOString(), offsetMin);
+  return [
+    "# Conversation " + first.date + " " + first.time + " " + label,
+    "",
+    "| | |",
+    "|---|---|",
+    "| Person | " + ((person && person.name) || "You") + " |",
+    "| Conversation ID | `" + conversationId + "` |",
+    "| User ID | `" + (userId || "") + "` |",
+    "| Started | " + first.date + " " + first.time + " " + label + " |",
+    "",
+  ].join("\n");
+}
+
+/** NNNN-HHMMSS-user|agent.md for the index-th message (1-based). */
+export function messageFile(a, index, offsetMin, person) {
+  const p = localParts(a.timestamp || a.localTimestamp, offsetMin);
+  const user = isUser(a);
+  const out = ["### " + (user ? "🧑 " + ((person && person.name) || "You") : "🤖 " + ((a.from && a.from.name) || "Agent")) + " · " + p.time, ""];
+  if (a.text) out.push(a.text, "");
+  for (const att of a.attachments || []) out.push(describeAttachment(att), "");
+  const sa = a.suggestedActions && a.suggestedActions.actions;
+  if (sa && sa.length) out.push("> Suggested: " + sa.map((x) => x.title || x.value).join(" · "), "");
+  return {
+    name: String(index).padStart(4, "0") + "-" + p.time.replace(/:/g, "") + "-" + (user ? "user" : "agent") + ".md",
+    content: out.join("\n"),
+  };
 }
 
 async function fetchActivities(env, conversationId) {
@@ -237,27 +282,57 @@ function contentsUrl(env, path) {
   return "https://api.github.com/repos/" + env.LOG_REPO + "/contents/" + path.split("/").map(encodeURIComponent).join("/");
 }
 
-async function githubUpsert(env, path, content, message) {
+/**
+ * Create-only write. No read, no sha, so it can never overwrite an existing file:
+ * GitHub answers 422 when the path already exists, which counts as "already written".
+ * 409 (branch moved under us by a parallel write) is retried.
+ */
+export async function createOnly(env, path, content, message, budget) {
   const url = contentsUrl(env, path);
-  const headers = ghHeaders(env);
-  const b64 = b64utf8(content);
+  const body = JSON.stringify({ message, content: b64utf8(content), branch: env.LOG_BRANCH || "main" });
   for (let attempt = 0; attempt < 3; attempt++) {
-    let sha;
-    const g = await fetch(url, { headers });
-    if (g.status === 200) {
-      const j = await g.json();
-      sha = j.sha;
-      if ((j.content || "").replace(/\n/g, "") === b64) return { changed: false };
-    } else if (g.status !== 404) {
-      return { error: "github_read_" + g.status };
-    }
-    const body = { message, content: b64 };
-    if (sha) body.sha = sha;
-    const p = await fetch(url, { method: "PUT", headers, body: JSON.stringify(body) });
-    if (p.ok) return { changed: true };
-    if (p.status !== 409 && p.status !== 422) return { error: "github_write_" + p.status };
+    if (budget.left <= 0) return { error: "budget" };
+    budget.left--;
+    const p = await fetch(url, { method: "PUT", headers: ghHeaders(env), body });
+    if (p.ok) return { created: true };
+    if (p.status === 422) return { exists: true };
+    if (p.status !== 409) return { error: "github_write_" + p.status };
   }
   return { error: "github_conflict" };
+}
+
+/** Read every file of one session folder with a single GraphQL request. */
+async function readSessionFolder(env, folder) {
+  const [owner, name] = String(env.LOG_REPO).split("/");
+  const query =
+    "query($o:String!,$n:String!,$e:String!){repository(owner:$o,name:$n){object(expression:$e){" +
+    "... on Tree{entries{name type object{... on Blob{text}}}}}}}";
+  const r = await fetch("https://api.github.com/graphql", {
+    method: "POST",
+    headers: ghHeaders(env),
+    body: JSON.stringify({ query, variables: { o: owner, n: name, e: (env.LOG_BRANCH || "main") + ":" + folder } }),
+  });
+  if (!r.ok) return { error: "github_read_" + r.status };
+  const j = await r.json();
+  if (j.errors && !j.data) return { error: "github_read_graphql" };
+  const obj = j.data && j.data.repository && j.data.repository.object;
+  if (!obj || !obj.entries) return { error: "not_found" };
+  const files = obj.entries
+    .filter((e) => e.type === "blob" && /\.md$/.test(e.name))
+    .map((e) => ({ name: e.name, text: (e.object && e.object.text) || "" }))
+    .sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0));
+  return { files };
+}
+
+/** Join a session folder's files into one transcript (header, rule, messages in order). */
+export function joinSession(files) {
+  const head = files.find((f) => f.name === "0000-session.md");
+  const msgs = files
+    .filter((f) => f.name !== "0000-session.md")
+    .slice()
+    .sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0));
+  return ((head ? head.text.replace(/\s+$/, "") + "\n" : "") + "| Messages | " + msgs.length + " |\n\n---\n\n" +
+    msgs.map((f) => f.text.replace(/\s+$/, "")).join("\n\n") + "\n");
 }
 
 // ---------- handlers ----------
@@ -344,13 +419,34 @@ async function handleLog(env, origin, person, body) {
   if (!env.LOG_REPO || !env.LOG_REPO_TOKEN) return json({ logged: false, reason: "logging_disabled" }, 200, origin);
   const c = await loadConversation(env, origin, body);
   if (c.res) return c.res;
-  if (!c.acts.some((a) => a.type === "message")) return json({ logged: false, reason: "empty" }, 200, origin);
+  const msgs = c.acts.filter((a) => a.type === "message");
+  if (!msgs.length) return json({ logged: false, reason: "empty" }, 200, origin);
   const offset = parseInt(env.LOG_TZ_OFFSET_MIN || "330", 10);
-  const path = logPath(c.id, c.acts, offset, person.slug);
-  const md = renderTranscript(c.id, c.acts, offset, person);
-  const res = await githubUpsert(env, path, md, "log(" + person.slug + "): " + path.slice(5));
-  if (res.error) return json({ logged: false, error: res.error }, 502, origin);
-  return json({ logged: true, changed: res.changed, path }, 200, origin);
+  const folder = sessionFolder(c.id, c.acts, offset, person.slug);
+  const since = Number.isInteger(body.since) && body.since > 0 ? Math.min(body.since, msgs.length) : 0;
+  const firstUser = msgs.find(isUser);
+  const userId = typeof body.userId === "string" && USER_RE.test(body.userId)
+    ? body.userId
+    : (firstUser && firstUser.from && firstUser.from.id) || "";
+  const budget = { left: WRITE_BUDGET };
+  const label = "log(" + person.slug + "): " + folder.slice(5);
+  let written = 0;
+  let done = since;
+
+  if (since === 0) {
+    const h = await createOnly(env, folder + "/0000-session.md", sessionHeader(c.id, c.acts, offset, person, userId), label + " start", budget);
+    if (h.error) return json({ logged: false, error: h.error, folder, total: 0 }, 502, origin);
+    if (h.created) written++;
+  }
+  for (let i = since; i < msgs.length; i++) {
+    const f = messageFile(msgs[i], i + 1, offset, person);
+    const r = await createOnly(env, folder + "/" + f.name, f.content, label + " #" + (i + 1), budget);
+    if (r.error === "budget") break;
+    if (r.error) return json({ logged: false, error: r.error, folder, total: done }, 502, origin);
+    if (r.created) written++;
+    done = i + 1;
+  }
+  return json({ logged: true, folder, written, total: done, more: done < msgs.length }, 200, origin);
 }
 
 async function handleExport(env, origin, person, body) {
@@ -370,27 +466,34 @@ async function handleHistory(env, origin, person) {
   if (r.status === 404 || r.status === 409) return json({ items: [] }, 200, origin); // empty repo
   if (!r.ok) return json({ error: "github_read_" + r.status }, 502, origin);
   const tree = await r.json();
-  const items = [];
+  const sessions = new Map();
   for (const t of tree.tree || []) {
     if (t.type !== "blob") continue;
-    const m = PATH_RE.exec(t.path);
-    if (!m) continue;
+    const slash = t.path.lastIndexOf("/");
+    const folder = t.path.slice(0, slash);
+    const m = SESSION_RE.exec(folder);
+    if (!m || !/^\d{4}-.*\.md$/.test(t.path.slice(slash + 1))) continue;
     if (!person.admin && m[3] !== person.slug) continue;
-    items.push({ path: t.path, date: m[1], time: m[2].slice(0, 2) + ":" + m[2].slice(2), person: m[3], size: t.size || 0 });
+    let s = sessions.get(folder);
+    if (!s) {
+      s = { path: folder, date: m[1], time: m[2].slice(0, 2) + ":" + m[2].slice(2), person: m[3], messages: 0 };
+      sessions.set(folder, s);
+    }
+    if (!t.path.endsWith("/0000-session.md")) s.messages++;
   }
-  items.sort((a, b) => (a.path < b.path ? 1 : a.path > b.path ? -1 : 0));
+  const items = [...sessions.values()].sort((a, b) => (a.path < b.path ? 1 : a.path > b.path ? -1 : 0));
   return json({ items: items.slice(0, 300), truncated: !!tree.truncated || items.length > 300 }, 200, origin);
 }
 
 async function handleTranscript(env, origin, person, body) {
   if (!env.LOG_REPO || !env.LOG_REPO_TOKEN) return json({ error: "logging_disabled" }, 400, origin);
-  const m = typeof body.path === "string" ? PATH_RE.exec(body.path) : null;
+  const m = typeof body.path === "string" ? SESSION_RE.exec(body.path) : null;
   if (!m) return json({ error: "bad_path" }, 400, origin);
   if (!person.admin && m[3] !== person.slug) return json({ error: "forbidden" }, 403, origin);
-  const r = await fetch(contentsUrl(env, body.path), { headers: ghHeaders(env, "application/vnd.github.raw+json") });
-  if (r.status === 404) return json({ error: "not_found" }, 404, origin);
-  if (!r.ok) return json({ error: "github_read_" + r.status }, 502, origin);
-  return json({ markdown: await r.text(), path: body.path }, 200, origin);
+  const res = await readSessionFolder(env, body.path);
+  if (res.error === "not_found") return json({ error: "not_found" }, 404, origin);
+  if (res.error) return json({ error: res.error }, 502, origin);
+  return json({ markdown: joinSession(res.files), path: body.path, files: res.files.length }, 200, origin);
 }
 
 const ROUTES = {

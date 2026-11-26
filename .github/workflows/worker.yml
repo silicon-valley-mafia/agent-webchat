@@ -22,7 +22,7 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 22
-      - run: node --test test/token.test.js
+      - run: node --test test/token.test.js test/log.test.js
 
   deploy:
     needs: test
@@ -30,6 +30,7 @@ jobs:
     runs-on: ubuntu-latest
     env:
       CF_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      HAS_LOG_TOKEN: ${{ secrets.GITHUB_LOG_TOKEN != '' }}
     steps:
       - uses: actions/checkout@v4
       - name: Skip notice
@@ -48,3 +49,15 @@ jobs:
         env:
           DIRECTLINE_SECRET: ${{ secrets.DIRECTLINE_SECRET }}
           ACCESS_CODE: ${{ secrets.ACCESS_CODE }}
+      # Optional: transcript logging. Only runs when the GITHUB_LOG_TOKEN repo secret exists.
+      - name: Set transcript logging token
+        if: env.CF_TOKEN != '' && env.HAS_LOG_TOKEN == 'true'
+        working-directory: worker
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          GITHUB_LOG_TOKEN: ${{ secrets.GITHUB_LOG_TOKEN }}
+        run: printf '%s' "$GITHUB_LOG_TOKEN" | npx --yes wrangler@3 secret put GITHUB_LOG_TOKEN
+      - name: Logging status
+        if: env.CF_TOKEN != '' && env.HAS_LOG_TOKEN != 'true'
+        run: echo "GITHUB_LOG_TOKEN secret not set - transcript logging stays disabled."

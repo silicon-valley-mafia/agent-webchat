@@ -242,5 +242,5 @@ test("joinSession: header, message count, messages in name order", () => {
 
 test("health reports logging flag", async () => {
   const h = await worker.fetch(new Request("https://w.example/health"), env);
-  assert.deepEqual(await h.json(), { ok: true, configured: true, logging: true, people: 1 });
+  assert.deepEqual(await h.json(), { ok: true, configured: true, logging: true, artifacts: false, people: 1 });
 });

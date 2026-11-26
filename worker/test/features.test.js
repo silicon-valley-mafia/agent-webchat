@@ -276,5 +276,5 @@ test("wrong codes on api endpoints burn the token bucket", async () => {
 
 test("health reports people count", async () => {
   const h = await (await worker.fetch(new Request("https://w.example/health"), env)).json();
-  assert.deepEqual(h, { ok: true, configured: true, logging: true, people: 3 });
+  assert.deepEqual(h, { ok: true, configured: true, logging: true, artifacts: false, people: 3 });
 });

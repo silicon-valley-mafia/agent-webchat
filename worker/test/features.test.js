@@ -10,7 +10,7 @@ const env = {
   OWNER_NAME: "Deepesh",
   ACCESS_CODES: JSON.stringify({ "friend-code": "Ravi Kumar", "boss-code": { name: "Asha", admin: true } }),
   LOG_REPO: "silicon-valley-mafia/agent-webchat-logs",
-  GITHUB_LOG_TOKEN: "gh-token",
+  LOG_REPO_TOKEN: "gh-token",
 };
 
 const ACTS = [
@@ -164,7 +164,7 @@ test("export: returns markdown + filename, writes nothing", async () => {
 });
 
 test("export works even when logging is disabled", async () => {
-  const res = await worker.fetch(req("/export", "owner-code", { conversationId: "ConvA" }), { ...env, GITHUB_LOG_TOKEN: undefined });
+  const res = await worker.fetch(req("/export", "owner-code", { conversationId: "ConvA" }), { ...env, LOG_REPO_TOKEN: undefined });
   assert.equal(res.status, 200);
 });
 
@@ -195,7 +195,7 @@ test("history: empty log repo -> empty list", async () => {
 });
 
 test("history: logging disabled -> empty list with reason", async () => {
-  const j = await (await worker.fetch(req("/history", "owner-code"), { ...env, GITHUB_LOG_TOKEN: undefined })).json();
+  const j = await (await worker.fetch(req("/history", "owner-code"), { ...env, LOG_REPO_TOKEN: undefined })).json();
   assert.deepEqual(j, { items: [], reason: "logging_disabled" });
 });
 

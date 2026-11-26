@@ -8,7 +8,7 @@ const env = {
   DIRECTLINE_SECRET: "test-secret",
   ACCESS_CODE: "open-sesame",
   LOG_REPO: "silicon-valley-mafia/agent-webchat-logs",
-  GITHUB_LOG_TOKEN: "gh-token",
+  LOG_REPO_TOKEN: "gh-token",
   OWNER_NAME: "Deepesh",
 };
 
@@ -132,7 +132,7 @@ test("log: github auth failure surfaces status", async () => {
 });
 
 test("log: disabled when no token configured (page keeps working)", async () => {
-  const res = await worker.fetch(req({ conversationId: "Conv-123-in" }), { ...env, GITHUB_LOG_TOKEN: undefined });
+  const res = await worker.fetch(req({ conversationId: "Conv-123-in" }), { ...env, LOG_REPO_TOKEN: undefined });
   assert.equal(res.status, 200);
   assert.deepEqual(await res.json(), { logged: false, reason: "logging_disabled" });
   assert.equal(calls.length, 0);

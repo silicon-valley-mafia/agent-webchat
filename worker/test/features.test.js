@@ -1,6 +1,6 @@
 import { test, beforeEach } from "node:test";
 import assert from "node:assert/strict";
-import worker, { _resetRateLimiter, identify, people, slugify, PATH_RE } from "../src/index.js";
+import worker, { _resetRateLimiter, identify, people, slugify, SESSION_RE } from "../src/index.js";
 
 const ORIGIN = "https://silicon-valley-mafia.github.io";
 const env = {
@@ -24,12 +24,23 @@ const TREE = {
     { path: "README.md", type: "blob" },
     { path: "logs", type: "tree" },
     { path: "logs/2026-11-27", type: "tree" },
-    { path: "logs/2026-11-27/0140-deepesh--ConvA.md", type: "blob", size: 900 },
-    { path: "logs/2026-11-27/0905-ravi-kumar--ConvB.md", type: "blob", size: 400 },
-    { path: "logs/2026-11-26/2300-asha--ConvC.md", type: "blob", size: 100 },
-    { path: "logs/2026-11-26/old-format-file.md", type: "blob", size: 1 },
+    { path: "logs/2026-11-27/0140-deepesh--ConvA", type: "tree" },
+    { path: "logs/2026-11-27/0140-deepesh--ConvA/0000-session.md", type: "blob" },
+    { path: "logs/2026-11-27/0140-deepesh--ConvA/0001-014005-user.md", type: "blob" },
+    { path: "logs/2026-11-27/0140-deepesh--ConvA/0002-014009-agent.md", type: "blob" },
+    { path: "logs/2026-11-27/0905-ravi-kumar--ConvB/0000-session.md", type: "blob" },
+    { path: "logs/2026-11-27/0905-ravi-kumar--ConvB/0001-090501-user.md", type: "blob" },
+    { path: "logs/2026-11-26/2300-asha--ConvC/0000-session.md", type: "blob" },
+    { path: "logs/2026-11-26/old-format-file.md", type: "blob" },
+    { path: "logs/2026-11-26/2300-asha--ConvC/notes.txt", type: "blob" },
   ],
 };
+
+const GQL_FILES = [
+  { name: "0002-014009-agent.md", type: "blob", object: { text: "### 🤖 Agent · 01:40:09\n\nhello\n" } },
+  { name: "0000-session.md", type: "blob", object: { text: "# Conversation\n\n| Conversation ID | `ConvB` |\n" } },
+  { name: "0001-014005-user.md", type: "blob", object: { text: "### 🧑 Ravi Kumar · 01:40:05\n\nhi\n" } },
+];
 
 let calls;
 function mock(over = {}) {
@@ -41,7 +52,8 @@ function mock(over = {}) {
     if (/\/v3\/directline\/conversations\/[^/]+$/.test(url)) return Response.json({ conversationId: "ConvA", token: "resumed-tok", expires_in: 3600, streamUrl: "wss://x" });
     if (url.includes("/activities")) return Response.json({ activities: url.includes("watermark") ? [] : ACTS, watermark: "2" });
     if (url.includes("/git/trees/")) return Response.json(TREE);
-    if (url.includes("/contents/")) return new Response("# transcript body", { status: 200 });
+    if (url === "https://api.github.com/graphql") return Response.json({ data: { repository: { object: { entries: GQL_FILES } } } });
+    if (url.includes("/contents/") && init.method === "PUT") return new Response("{}", { status: 201 });
     throw new Error("unexpected " + url);
   };
 }
@@ -100,24 +112,23 @@ test("token: returns the person's name and puts it in the Direct Line user", asy
   assert.deepEqual(JSON.parse(calls[0].init.body).user.name, "Ravi Kumar");
 });
 
-test("log: file name and transcript carry the caller's name", async () => {
-  mock({
-    "https://api.github.com/repos/silicon-valley-mafia/agent-webchat-logs/contents/logs/2026-11-27/0140-ravi-kumar--ConvA.md": () =>
-      new Response("{}", { status: 404 }),
-  });
-  globalThis.fetch = ((orig) => async (url, init = {}) => {
-    if (url.includes("/contents/") && init.method === "PUT") {
-      calls.push({ url, init });
-      return new Response("{}", { status: 201 });
-    }
-    return orig(url, init);
-  })(globalThis.fetch);
+test("log: each person's sessions get their own folder under the day", async () => {
   const j = await (await worker.fetch(req("/log", "friend-code", { conversationId: "ConvA" }), env)).json();
-  assert.equal(j.path, "logs/2026-11-27/0140-ravi-kumar--ConvA.md");
+  assert.equal(j.folder, "logs/2026-11-27/0140-ravi-kumar--ConvA");
+  const putUrls = calls.filter((c) => c.init.method === "PUT").map((c) => decodeURIComponent(c.url.split("/contents/")[1]));
+  assert.deepEqual(putUrls, [
+    "logs/2026-11-27/0140-ravi-kumar--ConvA/0000-session.md",
+    "logs/2026-11-27/0140-ravi-kumar--ConvA/0001-014005-user.md",
+    "logs/2026-11-27/0140-ravi-kumar--ConvA/0002-014009-agent.md",
+  ]);
   const put = calls.find((c) => c.init.method === "PUT");
   const md = new TextDecoder().decode(Uint8Array.from(atob(JSON.parse(put.init.body).content), (c) => c.charCodeAt(0)));
   assert.match(md, /\| Person \| Ravi Kumar \|/);
   assert.match(JSON.parse(put.init.body).message, /^log\(ravi-kumar\): /);
+  // a second person's session the same day lands in a sibling folder
+  mock();
+  const k = await (await worker.fetch(req("/log", "boss-code", { conversationId: "ConvZ" }), env)).json();
+  assert.equal(k.folder, "logs/2026-11-27/0140-asha--ConvZ");
 });
 
 // ---- resume ----
@@ -170,14 +181,13 @@ test("export works even when logging is disabled", async () => {
 
 // ---- history ----
 
-test("history: admin sees everyone, newest first, ignores non-log files", async () => {
+test("history: one item per session folder, newest first, message counts, ignores stray files", async () => {
   const j = await (await worker.fetch(req("/history", "owner-code"), env)).json();
-  assert.deepEqual(j.items.map((i) => i.path), [
-    "logs/2026-11-27/0905-ravi-kumar--ConvB.md",
-    "logs/2026-11-27/0140-deepesh--ConvA.md",
-    "logs/2026-11-26/2300-asha--ConvC.md",
+  assert.deepEqual(j.items, [
+    { path: "logs/2026-11-27/0905-ravi-kumar--ConvB", date: "2026-11-27", time: "09:05", person: "ravi-kumar", messages: 1 },
+    { path: "logs/2026-11-27/0140-deepesh--ConvA", date: "2026-11-27", time: "01:40", person: "deepesh", messages: 2 },
+    { path: "logs/2026-11-26/2300-asha--ConvC", date: "2026-11-26", time: "23:00", person: "asha", messages: 0 },
   ]);
-  assert.deepEqual(j.items[0], { path: "logs/2026-11-27/0905-ravi-kumar--ConvB.md", date: "2026-11-27", time: "09:05", person: "ravi-kumar", size: 400 });
   assert.match(calls[0].url, /\/git\/trees\/main\?recursive=1$/);
 });
 
@@ -201,29 +211,45 @@ test("history: logging disabled -> empty list with reason", async () => {
 
 // ---- transcript ----
 
-test("transcript: owner can read any log (raw media type)", async () => {
-  const j = await (await worker.fetch(req("/transcript", "owner-code", { path: "logs/2026-11-27/0905-ravi-kumar--ConvB.md" }), env)).json();
-  assert.equal(j.markdown, "# transcript body");
-  assert.equal(calls[0].init.headers.Accept, "application/vnd.github.raw+json");
+test("transcript: whole session folder read in ONE GraphQL call and joined in order", async () => {
+  const j = await (await worker.fetch(req("/transcript", "owner-code", { path: "logs/2026-11-27/0905-ravi-kumar--ConvB" }), env)).json();
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].url, "https://api.github.com/graphql");
+  const q = JSON.parse(calls[0].init.body);
+  assert.deepEqual(q.variables, { o: "silicon-valley-mafia", n: "agent-webchat-logs", e: "main:logs/2026-11-27/0905-ravi-kumar--ConvB" });
+  assert.equal(calls[0].init.headers.Authorization, "Bearer gh-token");
+  assert.equal(j.files, 3);
+  assert.equal(
+    j.markdown,
+    "# Conversation\n\n| Conversation ID | `ConvB` |\n| Messages | 2 |\n\n---\n\n### 🧑 Ravi Kumar · 01:40:05\n\nhi\n\n### 🤖 Agent · 01:40:09\n\nhello\n"
+  );
 });
 
-test("transcript: non-admin cannot read someone else's log", async () => {
-  const res = await worker.fetch(req("/transcript", "friend-code", { path: "logs/2026-11-27/0140-deepesh--ConvA.md" }), env);
+test("transcript: missing folder -> 404", async () => {
+  mock({ "https://api.github.com/graphql": () => Response.json({ data: { repository: { object: null } } }) });
+  const res = await worker.fetch(req("/transcript", "owner-code", { path: "logs/2026-11-27/0905-ravi-kumar--Nope" }), env);
+  assert.equal(res.status, 404);
+});
+
+test("transcript: non-admin cannot read someone else's session", async () => {
+  const res = await worker.fetch(req("/transcript", "friend-code", { path: "logs/2026-11-27/0140-deepesh--ConvA" }), env);
   assert.equal(res.status, 403);
   assert.equal(calls.length, 0);
 });
 
-test("transcript: path traversal / foreign paths rejected", async () => {
-  for (const path of ["../secrets.md", "logs/2026-11-27/../../x.md", "README.md", "logs/2026-11-27/0140-deepesh--A/B.md", 5]) {
+test("transcript: path traversal / non-session paths rejected", async () => {
+  for (const path of ["../secrets", "logs/2026-11-27/../../x", "README.md", "logs/2026-11-27/0140-deepesh--A/B",
+    "logs/2026-11-27/0140-deepesh--ConvA/0001-014005-user.md", "logs/2026-11-27/0140-deepesh--ConvA.md", 5]) {
     const res = await worker.fetch(req("/transcript", "owner-code", { path }), env);
     assert.equal(res.status, 400, String(path));
   }
   assert.equal(calls.length, 0);
 });
 
-test("PATH_RE matches what logPath produces", () => {
-  assert.ok(PATH_RE.test("logs/2026-11-27/0140-deepesh--Conv-123-in.md"));
-  assert.ok(!PATH_RE.test("logs/2026-11-27/0140-Conv-123-in.md"));
+test("SESSION_RE matches session folders only", () => {
+  assert.ok(SESSION_RE.test("logs/2026-11-27/0140-deepesh--Conv-123-in"));
+  assert.ok(!SESSION_RE.test("logs/2026-11-27/0140-deepesh--Conv-123-in.md"));
+  assert.ok(!SESSION_RE.test("logs/2026-11-27/0140-Conv-123-in"));
 });
 
 // ---- guards apply to every new endpoint ----

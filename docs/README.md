@@ -8,17 +8,32 @@ per-person access codes, and saves every conversation to the private repo `silic
 Browser (GitHub Pages: web/)  ──POST /token, /resume, /log, /export, /history, /transcript──▶  Cloudflare Worker (worker/)
                                                                      holds DIRECTLINE_SECRET, ACCESS_CODE(S), LOG_REPO_TOKEN
 Browser ── Bot Framework Web Chat ⇄ Direct Line (single-conversation token) ⇄ agent
-Worker  ── reads conversations from Direct Line, writes logs/YYYY-MM-DD/HHMM-<person>--<conversation>.md ──▶ private log repo
+Worker  ── reads conversations from Direct Line, CREATES files (never edits) ──▶ private log repo
 ```
+
+### Log layout (one folder per day, one folder per session, write-only)
+```
+logs/
+  2026-11-27/                                   ← one folder per day (IST)
+    0140-deepesh--<conversationId>/             ← one folder per session: start time, person, conversation
+      0000-session.md                           ← person, conversation ID, user ID, start time
+      0001-014005-user.md                       ← one file per message: index, time, sender
+      0002-014009-agent.md
+      ...
+    0905-ravi--<conversationId>/
+```
+- Files are only ever **created**. The logger never reads back, edits or deletes a log file (only History/View read). A create for a path that already exists is refused by GitHub (422) and skipped, so nothing is overwritten.
+- The page remembers how many messages are already written (`since`), so each save only creates the new ones.
+- One save writes at most 40 files (Cloudflare free plan: 50 sub-requests per request). Longer backlogs are written over several saves; the page continues automatically.
 
 ## Features
 | Feature | How it works |
 |---|---|
 | **Access codes, per person** | `ACCESS_CODE` = owner (admin, named `OWNER_NAME`). `ACCESS_CODES` adds more people. The code is typed once and remembered in the browser. **Forget code** removes it. |
 | **Continue after refresh** | Reopening the page re-attaches to your last conversation (if it's under 24 h old) through `/resume`. The Worker calls Direct Line *reconnect* with the secret. The chat polls once, so the earlier messages replay. If Microsoft has already expired the conversation, a new chat starts and the old one stays in History. |
-| **History** | Lists saved transcripts, newest first. Admins see everyone; other people see only their own. **View** renders the transcript, **Continue** re-attaches to that conversation, and **⬇** downloads it. |
+| **History** | Lists saved sessions (folders), newest first, with message counts. Admins see everyone; other people see only their own. **View** joins the session's files into one transcript (a single GraphQL read), **Continue** re-attaches to that conversation, and **⬇** downloads it as one Markdown file. |
 | **Download** | **⬇ Download** saves the current chat as Markdown. The Worker renders it from Direct Line, so this works even with logging off. |
-| **Transcript logging** | 4 s after each message (and on New chat or tab hide), the Worker re-reads the conversation from Direct Line and upserts one file per conversation. Unchanged files aren't re-committed; write conflicts are retried. |
+| **Transcript logging** | 4 s after each message (and on New chat or tab hide), the Worker re-reads the conversation from Direct Line and creates one file per new message in the session's folder (see *Log layout*). Parallel-write conflicts (409) are retried. |
 | **File uploads** | Paperclip button, multiple files. Logs record name, type and Direct Line URL (these URLs expire), not the file bytes. |
 | **Dark mode** | 🌓 button cycles auto → light → dark (saved per browser). Switching re-attaches the open chat in the new theme. |
 | **Avatars & colours** | `accentColor`, `botAvatarInitials`, `botAvatarImage`, `userAvatarImage` in `web/config.js`. User initials default to the person's name. |
@@ -61,7 +76,7 @@ Add a repo secret **`ACCESS_CODES`** containing a JSON object, then run **Token 
 
 ## Tests
 ```bash
-cd worker && node --test test/token.test.js test/log.test.js test/features.test.js   # 51 tests, no network
+cd worker && node --test test/token.test.js test/log.test.js test/features.test.js   # 59 tests, no network
 ```
 
 ## Files
@@ -70,6 +85,6 @@ cd worker && node --test test/token.test.js test/log.test.js test/features.test.
 | `web/index.html`, `web/app.css`, `web/app.js` | Page shell, styles (light and dark), client logic |
 | `web/config.js` | Public settings: endpoint, look, features. No secrets |
 | `worker/src/index.js` | Token broker, resume, logging, export, history, transcripts, per-person codes |
-| `worker/test/*.test.js` | 51 tests: auth, rate limits, logging, conflicts, history ACL, path validation, resume, secret non-leakage |
+| `worker/test/*.test.js` | 59 tests: auth, rate limits, write-only logging, chunking, conflicts, history ACL, path validation, resume, secret non-leakage |
 | `.github/workflows/pages.yml` | Deploys `web/` to Pages |
 | `.github/workflows/worker.yml` | Tests and deploys the Worker, plus the optional secrets when present |

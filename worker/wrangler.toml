@@ -1,0 +1,12 @@
+name = "agent-webchat-token"
+main = "src/index.js"
+compatibility_date = "2025-01-01"
+
+[vars]
+ALLOWED_ORIGINS = "https://silicon-valley-mafia.github.io"
+DIRECTLINE_DOMAIN = "https://directline.botframework.com"
+RATE_LIMIT_PER_MIN = "10"
+
+# Secrets - NEVER put them in this file. Set them with:
+#   npx wrangler secret put DIRECTLINE_SECRET
+#   npx wrangler secret put ACCESS_CODE

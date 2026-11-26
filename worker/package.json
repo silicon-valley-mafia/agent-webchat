@@ -1,0 +1,13 @@
+{
+  "name": "agent-webchat-token",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "node --test test/token.test.js",
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy"
+  },
+  "devDependencies": {
+    "wrangler": "^3.0.0"
+  }
+}

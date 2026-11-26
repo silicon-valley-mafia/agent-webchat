@@ -1,256 +1,47 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="en" data-theme="light">
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <meta name="referrer" content="no-referrer" />
   <title>Agent Web Chat</title>
+  <link rel="stylesheet" href="app.css" />
   <script src="config.js"></script>
   <script crossorigin="anonymous" src="https://cdn.botframework.com/botframework-webchat/latest/webchat.js"></script>
-  <style>
-    html, body { height: 100%; margin: 0; font-family: system-ui, sans-serif; background: #f3f4f6; }
-    #app { display: flex; flex-direction: column; height: 100%; max-width: 900px; margin: 0 auto; background: #fff; box-shadow: 0 0 12px rgba(0,0,0,.08); }
-    header { padding: 10px 16px; background: #24292f; color: #fff; display: flex; justify-content: space-between; align-items: center; gap: 8px; }
-    header h1 { font-size: 16px; margin: 0; }
-    header .right { display: flex; align-items: center; gap: 6px; }
-    header button { background: transparent; color: #fff; border: 1px solid #888; border-radius: 6px; padding: 4px 10px; cursor: pointer; }
-    header button:disabled { opacity: .5; cursor: default; }
-    #logstate { font-size: 12px; color: #9ca3af; min-width: 60px; text-align: right; }
-    #gate { margin: auto; padding: 24px; text-align: center; }
-    #gate input { padding: 8px; font-size: 15px; width: 220px; }
-    #gate button { padding: 8px 14px; font-size: 15px; margin-left: 6px; cursor: pointer; }
-    #status { color: #b91c1c; min-height: 1.2em; margin-top: 10px; font-size: 14px; }
-    #chatwrap { flex: 1; min-height: 0; display: none; }
-    #chatwrap > div { height: 100%; }
-  </style>
 </head>
 <body>
   <div id="app">
     <header>
-      <h1 id="title">Agent</h1>
+      <div class="left">
+        <h1 id="title">Agent</h1>
+        <span id="who"></span>
+      </div>
       <div class="right">
         <span id="logstate" title="Transcript logging status"></span>
-        <button id="newchat" type="button" style="display:none">New chat</button>
-        <button id="forget" type="button" style="display:none" title="Remove the saved access code from this browser">Forget code</button>
+        <button id="historybtn" type="button" hidden title="Saved conversations">History</button>
+        <button id="newchat" type="button" hidden>New chat</button>
+        <button id="download" type="button" hidden title="Download this conversation as Markdown">⬇ Download</button>
+        <button id="theme" type="button" title="Theme">🌓</button>
+        <button id="notify" type="button" hidden title="Notifications">🔕</button>
+        <button id="forget" type="button" hidden title="Remove the saved access code from this browser">Forget code</button>
       </div>
     </header>
+    <div id="notice" hidden></div>
     <form id="gate">
-      <p>Enter the access code to start a conversation.<br /><small>It is remembered in this browser, so you only type it once.</small></p>
+      <p>Enter your access code to start a conversation.<br /><small>It is remembered in this browser, so you only type it once.</small></p>
       <input id="code" type="password" autocomplete="current-password" placeholder="Access code" required />
       <button type="submit">Start</button>
       <div id="status"></div>
     </form>
-    <div id="chatwrap"></div>
+    <div id="chatwrap" hidden></div>
+    <section id="history" hidden>
+      <div class="head">
+        <h2 id="historytitle">Conversation history</h2>
+        <button id="historyclose" type="button">Close ✕</button>
+      </div>
+      <div id="historybody"></div>
+    </section>
   </div>
-
-  <script>
-    (function () {
-      var cfg = window.AGENT_WEBCHAT_CONFIG || {};
-      var gate = document.getElementById("gate");
-      var codeInput = document.getElementById("code");
-      var statusEl = document.getElementById("status");
-      var chatWrap = document.getElementById("chatwrap");
-      var newChatBtn = document.getElementById("newchat");
-      var forgetBtn = document.getElementById("forget");
-      var logStateEl = document.getElementById("logstate");
-      var STORE_KEY = "agentAccessCode";
-      var LOG_DEBOUNCE_MS = 4000;
-      var current = null; // { directLine, subs[], code, conversationId, logTimer, dirty }
-      var starting = false;
-
-      document.getElementById("title").textContent = cfg.title || "Agent";
-      document.title = cfg.title || "Agent Web Chat";
-
-      var configured = !!cfg.tokenEndpoint && cfg.tokenEndpoint.indexOf("REPLACE_WITH") !== 0;
-      var logEndpoint = cfg.logEndpoint || (configured ? cfg.tokenEndpoint.replace(/\/token\/?$/, "/log") : "");
-
-      var MESSAGES = {
-        bad_access_code: "Wrong access code.",
-        rate_limited: "Too many attempts - wait a minute and try again.",
-        origin_not_allowed: "This page's origin is not allowed by the token service.",
-        server_not_configured: "Token service is missing its secrets.",
-        directline_error: "The agent's Direct Line service rejected the request (check the secret / region).",
-        directline_unreachable: "Could not reach Direct Line."
-      };
-
-      function setLogState(text) { logStateEl.textContent = text || ""; }
-
-      async function getToken(code) {
-        if (!configured) {
-          var e = new Error("Not configured yet: set tokenEndpoint in web/config.js (then re-run the Pages workflow).");
-          e.code = "not_configured";
-          throw e;
-        }
-        var res = await fetch(cfg.tokenEndpoint, { method: "POST", headers: { "X-Access-Code": code } });
-        var body = {};
-        try { body = await res.json(); } catch (e2) {}
-        if (!res.ok) {
-          var err = new Error(MESSAGES[body.error] || ("Token request failed (" + res.status + ")"));
-          err.code = body.error;
-          throw err;
-        }
-        return body;
-      }
-
-      // ---- transcript logging: the Worker re-reads the conversation from Direct Line itself ----
-      function saveLog(session, opts) {
-        if (!session || !session.conversationId || !logEndpoint || session.loggingDisabled) return Promise.resolve();
-        session.dirty = false;
-        setLogState("Saving…");
-        return fetch(logEndpoint, {
-          method: "POST",
-          keepalive: !!(opts && opts.keepalive),
-          headers: { "X-Access-Code": session.code, "Content-Type": "application/json" },
-          body: JSON.stringify({ conversationId: session.conversationId })
-        }).then(function (r) { return r.json(); }).then(function (j) {
-          if (j.logged) setLogState("Saved ✓");
-          else if (j.reason === "logging_disabled") { session.loggingDisabled = true; setLogState(""); }
-          else if (j.reason === "empty") setLogState("");
-          else { session.dirty = true; setLogState("Not saved"); }
-        }).catch(function () { session.dirty = true; setLogState("Not saved"); });
-      }
-
-      function scheduleLog(session) {
-        session.dirty = true;
-        clearTimeout(session.logTimer);
-        session.logTimer = setTimeout(function () { saveLog(session); }, LOG_DEBOUNCE_MS);
-      }
-
-      function stopSession(session, flush) {
-        if (!session) return;
-        clearTimeout(session.logTimer);
-        if (flush && session.dirty) saveLog(session);
-        session.subs.forEach(function (s) { try { s.unsubscribe(); } catch (e) {} });
-        try { session.directLine.end(); } catch (e) {}
-      }
-
-      async function start(code) {
-        if (starting) return;
-        starting = true;
-        newChatBtn.disabled = true;
-        statusEl.textContent = "Connecting...";
-        try {
-          var t = await getToken(code);
-
-          // Tear down the previous chat completely before rendering a new one.
-          var previous = current;
-          current = null;
-          stopSession(previous, true);
-
-          var directLine = window.WebChat.createDirectLine({ token: t.token, domain: t.domain });
-          var session = { directLine: directLine, subs: [], code: code, conversationId: t.conversationId || null, logTimer: null, dirty: false };
-
-          session.subs.push(directLine.connectionStatus$.subscribe({
-            next: function (s) {
-              if (s === 2 && !session.greeted) {
-                session.greeted = true;
-                directLine.postActivity({
-                  type: "event",
-                  name: "startConversation",
-                  locale: cfg.locale || "en-US",
-                  localTimezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
-                  from: { id: t.userId }
-                }).subscribe();
-              }
-            }
-          }));
-          session.subs.push(directLine.activity$.subscribe({
-            next: function (a) {
-              if (a && a.conversation && a.conversation.id) session.conversationId = a.conversation.id;
-              if (a && a.type === "message") scheduleLog(session);
-            }
-          }));
-
-          // Fresh mount point every time: reusing the old element is what broke "New chat".
-          chatWrap.innerHTML = "";
-          var mount = document.createElement("div");
-          chatWrap.appendChild(mount);
-          window.WebChat.renderWebChat(
-            {
-              directLine: directLine,
-              userID: t.userId,
-              locale: cfg.locale || "en-US",
-              styleOptions: {
-                bubbleBorderRadius: 8,
-                bubbleFromUserBorderRadius: 8,
-                hideUploadButton: false,
-                disableFileUpload: false,
-                uploadMultiple: true,
-                uploadThumbnailQuality: 0.6
-              }
-            },
-            mount
-          );
-
-          current = session;
-          setLogState("");
-          gate.style.display = "none";
-          chatWrap.style.display = "block";
-          newChatBtn.style.display = "inline-block";
-          forgetBtn.style.display = "inline-block";
-          statusEl.textContent = "";
-          localStorage.setItem(STORE_KEY, code);
-        } finally {
-          starting = false;
-          newChatBtn.disabled = false;
-        }
-      }
-
-      function showGate(message) {
-        chatWrap.style.display = "none";
-        gate.style.display = "block";
-        statusEl.textContent = message || "";
-      }
-
-      gate.addEventListener("submit", function (e) {
-        e.preventDefault();
-        start(codeInput.value).catch(function (err) {
-          if (err.code === "bad_access_code") localStorage.removeItem(STORE_KEY);
-          statusEl.textContent = err.message;
-        });
-      });
-
-      newChatBtn.addEventListener("click", function () {
-        var code = localStorage.getItem(STORE_KEY) || (current && current.code);
-        if (!code) { showGate(); return; }
-        start(code).catch(function (err) {
-          if (err.code === "bad_access_code") localStorage.removeItem(STORE_KEY);
-          showGate(err.message);
-        });
-      });
-
-      forgetBtn.addEventListener("click", function () {
-        var s = current;
-        current = null;
-        stopSession(s, true);
-        localStorage.removeItem(STORE_KEY);
-        codeInput.value = "";
-        newChatBtn.style.display = "none";
-        forgetBtn.style.display = "none";
-        setLogState("");
-        showGate("Access code removed from this browser.");
-      });
-
-      // Save the transcript when the tab is hidden or closed.
-      document.addEventListener("visibilitychange", function () {
-        if (document.visibilityState === "hidden" && current && current.dirty) {
-          clearTimeout(current.logTimer);
-          saveLog(current, { keepalive: true });
-        }
-      });
-
-      if (!configured) statusEl.textContent = "Not configured yet: set tokenEndpoint in web/config.js.";
-
-      // Auto-start with the remembered code, so opening the page goes straight to chat.
-      var saved = localStorage.getItem(STORE_KEY);
-      if (saved && configured) {
-        codeInput.value = saved;
-        start(saved).catch(function (err) {
-          if (err.code === "bad_access_code") localStorage.removeItem(STORE_KEY);
-          showGate(err.message);
-        });
-      }
-    })();
-  </script>
+  <script src="app.js"></script>
 </body>
 </html>

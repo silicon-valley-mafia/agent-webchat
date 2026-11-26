@@ -1,9 +1,19 @@
 // Public configuration only - NO secrets here (this file is served publicly).
-// If the repo variable TOKEN_ENDPOINT is set, the Pages workflow only replaces the
-// placeholder; a real URL committed here is used as-is.
 window.AGENT_WEBCHAT_CONFIG = {
-  // Cloudflare Worker token endpoint (public URL, not a secret)
+  // Cloudflare Worker token endpoint (public URL, not a secret). Other endpoints are derived from it.
   tokenEndpoint: "https://agent-webchat-token.deepeshj-2k6.workers.dev/token",
   title: "GitHub Agent",
   locale: "en-US",
+
+  // Look
+  theme: "auto",              // "auto" (follow the device), "light" or "dark"; the 🌓 button overrides per browser
+  accentColor: "#2563eb",     // your bubbles, avatars, buttons
+  botAvatarInitials: "GH",
+  userAvatarInitials: "",     // empty = initials of the person's name
+  botAvatarImage: "",         // optional image URL, e.g. "https://avatars.githubusercontent.com/u/263164968"
+  userAvatarImage: "",
+
+  // Features
+  voice: true,                // microphone button (Chrome / Edge speech recognition)
+  notifications: true         // 🔔 button: desktop notification when the agent replies in a background tab
 };

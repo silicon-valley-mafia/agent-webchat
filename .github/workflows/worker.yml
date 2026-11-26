@@ -82,5 +82,5 @@ jobs:
         if: env.CF_TOKEN != ''
         run: |
           echo "Transcript logging: ${{ env.HAS_LOG_TOKEN == 'true' && 'ON' || 'off (add LOG_REPO_TOKEN)' }}"
-          echo "Attachments saved:  ${{ (env.HAS_LOG_TOKEN == 'true' || env.HAS_ARTIFACT_TOKEN == 'true') && 'ON (token must include artifacts-10)' || 'off (add LOG_REPO_TOKEN)' }}"
+          echo "Attachments saved:  ${{ (env.HAS_LOG_TOKEN == 'true' || env.HAS_ARTIFACT_TOKEN == 'true') && 'ON (token must include agent-webchat-artifcats-1)' || 'off (add LOG_REPO_TOKEN)' }}"
           echo "Per-person codes:   ${{ env.HAS_ACCESS_CODES == 'true' && 'ON' || 'off (add ACCESS_CODES)' }}"

@@ -1,0 +1,10 @@
+# Future work (noted 2026-11-27, not started)
+
+| # | Type | Item | Notes / starting points |
+|---|---|---|---|
+| 1 | Idea / fallback | **Stream the agent's reply from the log into the chat window** | Alternative path if Direct Line streaming hits limits: the Worker already writes every message to `agent-webchat-logs` (create-only, one file per message). The page could poll `/history` + `/transcript` (or a new "since N" endpoint) and render new message files as they land. Explore only if the live Direct Line path proves limiting. |
+| 2 | To do | **GitHub PR pop-up from the agent** | In the Copilot / Copilot Studio UI the agent shows a pop-up (form) to create a GitHub pull request. Find out how it is delivered (Adaptive Card? MCP app UI / `ui://` resource? `invoke` activity?) and whether Web Chat over Direct Line receives it. Probably needs a renderer / attachment middleware in `web/app.js`. |
+| 3 | Idea | **"Show thinking" option** | Check whether Copilot Studio emits reasoning / plan / tool-call activities over Direct Line (e.g. `typing` with text, `event` activities, `channelData` streaming info). If yes, add a toggle that shows them collapsed under each reply. |
+| 4 | Test | **Steer / pause / interrupt a response** | Test whether sending a new message mid-response, or a custom `event` activity, stops or redirects the agent over Direct Line. Document what works; add a Stop button only if supported. |
+| 5 | To do | **Remove the 1 GiB hard cap on saved attachments** | `ARTIFACT_MAX_BYTES` (default 1 GiB in `worker/src/artifacts.js` and `worker/wrangler.toml`) plus `MAX_PARTS = 100` (100 × 70 MiB ≈ 6.8 GiB). Remove/raise both; also the browser reads each part into memory and hashes the whole file only up to 256 MiB, so very large files need a streaming hash. |
+| 6 | Pending (owner) | **Deploy + browser test of PR #3/#4** | Paste screenshot, drop >10 MB file, drop `.v` file, paperclip PDF; check `/health` (`logging`, `artifacts`), `agent-webchat-logs/logs/`, `agent-webchat-artifcats-1/webchat-uploads/`. Not yet done. |

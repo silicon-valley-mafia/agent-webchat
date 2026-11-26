@@ -10,7 +10,7 @@
     download: $("download"), theme: $("theme"), notify: $("notify"), panel: $("history"),
     panelBody: $("historybody"), panelTitle: $("historytitle"), panelClose: $("historyclose"), notice: $("notice")
   };
-  var K = { code: "agentAccessCode", theme: "agentTheme", notify: "agentNotify", last: "agentLastSession" };
+  var K = { code: "agentAccessCode", theme: "agentTheme", notify: "agentNotify", last: "agentLastSession", logged: "agentLogged" };
   var RESUME_MAX_AGE_MS = 24 * 3600 * 1000;
   var LOG_DEBOUNCE_MS = 4000;
   var TITLE = cfg.title || "Agent";
@@ -134,25 +134,53 @@
   }
 
   // ---------------- logging ----------------
+  // The Worker only ever CREATES files: one folder per session, one file per message.
+  // We remember how many messages are already written (per conversation) and send it as `since`.
+  function loggedMap() {
+    try { return JSON.parse(localStorage.getItem(K.logged) || "{}") || {}; } catch (e) { return {}; }
+  }
+  function getLogged(conversationId) { return loggedMap()[conversationId] || 0; }
+  function setLogged(conversationId, n) {
+    var m = loggedMap();
+    m[conversationId] = n;
+    var keys = Object.keys(m);
+    if (keys.length > 100) keys.slice(0, keys.length - 100).forEach(function (k) { delete m[k]; });
+    localStorage.setItem(K.logged, JSON.stringify(m));
+  }
   function saveLog(s, opts) {
     if (!s || !s.conversationId || s.loggingDisabled) return Promise.resolve();
+    if (s.saving && !(opts && opts.keepalive)) { s.dirty = true; return s.saving; }
     s.dirty = false;
     setLogState("Saving…");
-    return fetch(base + "/log", {
+    var p = fetch(base + "/log", {
       method: "POST", keepalive: !!(opts && opts.keepalive),
       headers: { "X-Access-Code": s.code, "Content-Type": "application/json" },
-      body: JSON.stringify({ conversationId: s.conversationId })
+      body: JSON.stringify({ conversationId: s.conversationId, userId: s.userId, since: getLogged(s.conversationId) })
     }).then(function (r) { return r.json(); }).then(function (j) {
-      if (j.logged) setLogState("Saved ✓");
-      else if (j.reason === "logging_disabled") { s.loggingDisabled = true; setLogState(""); }
+      if (j.logged) {
+        setLogged(s.conversationId, j.total);
+        if (j.more) { s.dirty = true; setLogState("Saving…"); }
+        else setLogState(s.dirty ? "Saving…" : "Saved ✓");
+      } else if (j.reason === "logging_disabled") { s.loggingDisabled = true; setLogState(""); }
       else if (j.reason === "empty") setLogState("");
-      else { s.dirty = true; setLogState("Not saved"); }
-    }).catch(function () { s.dirty = true; setLogState("Not saved"); });
+      else {
+        if (typeof j.total === "number") setLogged(s.conversationId, j.total);
+        s.dirty = true; setLogState("Not saved");
+      }
+      return j;
+    }).catch(function () { s.dirty = true; setLogState("Not saved"); })
+      .then(function (j) {
+        s.saving = null;
+        // more pages to write, or new messages arrived while saving: go again (not after errors)
+        if (s.dirty && j && j.logged && current === s) scheduleLog(s, 300);
+      });
+    s.saving = p;
+    return p;
   }
-  function scheduleLog(s) {
+  function scheduleLog(s, delay) {
     s.dirty = true;
     clearTimeout(s.logTimer);
-    s.logTimer = setTimeout(function () { saveLog(s); }, LOG_DEBOUNCE_MS);
+    s.logTimer = setTimeout(function () { saveLog(s); }, delay === undefined ? LOG_DEBOUNCE_MS : delay);
   }
 
   // ---------------- sessions ----------------
@@ -325,6 +353,8 @@
     b.addEventListener("click", onClick);
     return b;
   }
+  /** logs/2026-11-27/0140-deepesh--conv  ->  2026-11-27_0140-deepesh--conv.md */
+  function fileName(item) { return item.path.split("/").slice(1).join("_") + ".md"; }
   function openPanel(title) { el.panelTitle.textContent = title; el.panel.hidden = false; el.panelBody.innerHTML = "<p class='muted'>Loading…</p>"; }
   function closePanel() { el.panel.hidden = true; }
 
@@ -346,7 +376,7 @@
       bar.className = "bar";
       bar.appendChild(button("← Back", function () { showHistory(); }));
       bar.appendChild(button("Continue this chat", function () { continueFrom(j.markdown); }, "primary"));
-      bar.appendChild(button("Download", function () { downloadText(j.markdown, item.path.split("/").slice(1).join("_")); }));
+      bar.appendChild(button("Download", function () { downloadText(j.markdown, fileName(item)); }));
       el.panelBody.appendChild(bar);
       var doc = document.createElement("div");
       doc.className = "transcript";
@@ -373,7 +403,8 @@
         var row = document.createElement("div");
         row.className = "row";
         var label = document.createElement("span");
-        label.textContent = item.time + (current && current.admin ? "  ·  " + item.person : "");
+        label.textContent = item.time + (current && current.admin ? "  ·  " + item.person : "") +
+          "  ·  " + (item.messages || 0) + " msg" + (item.messages === 1 ? "" : "s");
         row.appendChild(label);
         row.appendChild(button("View", function () { showTranscript(item); }));
         row.appendChild(button("Continue", function () {
@@ -381,7 +412,7 @@
             .catch(function (e) { notice(e.message); });
         }));
         row.appendChild(button("⬇", function () {
-          api("/transcript", code, { path: item.path }).then(function (t) { downloadText(t.markdown, item.path.split("/").slice(1).join("_")); })
+          api("/transcript", code, { path: item.path }).then(function (t) { downloadText(t.markdown, fileName(item)); })
             .catch(function (e) { notice(e.message); });
         }));
         el.panelBody.appendChild(row);
@@ -471,5 +502,5 @@
       .catch(handleAuthError);
   }
 
-  window.__agentWebchat = { renderMarkdown: renderMarkdown, parseIds: parseIds, styleOptions: styleOptions };
+  window.__agentWebchat = { renderMarkdown: renderMarkdown, parseIds: parseIds, styleOptions: styleOptions, fileName: fileName };
 })();

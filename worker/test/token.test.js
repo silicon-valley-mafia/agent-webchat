@@ -117,5 +117,5 @@ test("unknown path -> 404, health -> 200", async () => {
   assert.equal((await worker.fetch(req({ path: "x" }), env)).status, 404);
   const h = await worker.fetch(req({ path: "health", method: "GET" }), env);
   assert.equal(h.status, 200);
-  assert.deepEqual(await h.json(), { ok: true, configured: true });
+  assert.deepEqual(await h.json(), { ok: true, configured: true, logging: false });
 });

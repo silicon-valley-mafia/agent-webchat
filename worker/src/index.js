@@ -14,7 +14,7 @@
  *   GET /health  -> {ok, configured, logging, people}
  *
  * Secrets: DIRECTLINE_SECRET; ACCESS_CODE (owner, admin) and/or ACCESS_CODES (JSON:
- *   {"code": "Name"} or {"code": {"name": "Name", "admin": true}}); GITHUB_LOG_TOKEN (optional).
+ *   {"code": "Name"} or {"code": {"name": "Name", "admin": true}}); LOG_REPO_TOKEN (optional).
  * Vars: ALLOWED_ORIGINS, DIRECTLINE_DOMAIN, RATE_LIMIT_PER_MIN (token/resume, 10),
  *   API_RATE_LIMIT_PER_MIN (log/export/history/transcript, 60), LOG_REPO, LOG_BRANCH (main),
  *   LOG_TZ_OFFSET_MIN (330 = IST), OWNER_NAME (name for ACCESS_CODE, default "Owner").
@@ -225,7 +225,7 @@ async function fetchActivities(env, conversationId) {
 
 function ghHeaders(env, accept) {
   return {
-    Authorization: "Bearer " + env.GITHUB_LOG_TOKEN,
+    Authorization: "Bearer " + env.LOG_REPO_TOKEN,
     Accept: accept || "application/vnd.github+json",
     "X-GitHub-Api-Version": "2022-11-28",
     "User-Agent": "agent-webchat-logger",
@@ -341,7 +341,7 @@ async function loadConversation(env, origin, body) {
 }
 
 async function handleLog(env, origin, person, body) {
-  if (!env.LOG_REPO || !env.GITHUB_LOG_TOKEN) return json({ logged: false, reason: "logging_disabled" }, 200, origin);
+  if (!env.LOG_REPO || !env.LOG_REPO_TOKEN) return json({ logged: false, reason: "logging_disabled" }, 200, origin);
   const c = await loadConversation(env, origin, body);
   if (c.res) return c.res;
   if (!c.acts.some((a) => a.type === "message")) return json({ logged: false, reason: "empty" }, 200, origin);
@@ -363,7 +363,7 @@ async function handleExport(env, origin, person, body) {
 }
 
 async function handleHistory(env, origin, person) {
-  if (!env.LOG_REPO || !env.GITHUB_LOG_TOKEN) return json({ items: [], reason: "logging_disabled" }, 200, origin);
+  if (!env.LOG_REPO || !env.LOG_REPO_TOKEN) return json({ items: [], reason: "logging_disabled" }, 200, origin);
   const url =
     "https://api.github.com/repos/" + env.LOG_REPO + "/git/trees/" + encodeURIComponent(env.LOG_BRANCH || "main") + "?recursive=1";
   const r = await fetch(url, { headers: ghHeaders(env) });
@@ -383,7 +383,7 @@ async function handleHistory(env, origin, person) {
 }
 
 async function handleTranscript(env, origin, person, body) {
-  if (!env.LOG_REPO || !env.GITHUB_LOG_TOKEN) return json({ error: "logging_disabled" }, 400, origin);
+  if (!env.LOG_REPO || !env.LOG_REPO_TOKEN) return json({ error: "logging_disabled" }, 400, origin);
   const m = typeof body.path === "string" ? PATH_RE.exec(body.path) : null;
   if (!m) return json({ error: "bad_path" }, 400, origin);
   if (!person.admin && m[3] !== person.slug) return json({ error: "forbidden" }, 403, origin);
@@ -414,7 +414,7 @@ export default {
         {
           ok: true,
           configured: Boolean(env.DIRECTLINE_SECRET && people(env).length),
-          logging: Boolean(env.LOG_REPO && env.GITHUB_LOG_TOKEN),
+          logging: Boolean(env.LOG_REPO && env.LOG_REPO_TOKEN),
           people: people(env).length,
         },
         200,

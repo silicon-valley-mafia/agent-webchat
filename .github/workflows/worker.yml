@@ -30,7 +30,7 @@ jobs:
     runs-on: ubuntu-latest
     env:
       CF_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-      HAS_LOG_TOKEN: ${{ secrets.GITHUB_LOG_TOKEN != '' }}
+      HAS_LOG_TOKEN: ${{ secrets.LOG_REPO_TOKEN != '' }}
       HAS_ACCESS_CODES: ${{ secrets.ACCESS_CODES != '' }}
     steps:
       - uses: actions/checkout@v4
@@ -57,8 +57,8 @@ jobs:
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-          GITHUB_LOG_TOKEN: ${{ secrets.GITHUB_LOG_TOKEN }}
-        run: printf '%s' "$GITHUB_LOG_TOKEN" | npx --yes wrangler@3 secret put GITHUB_LOG_TOKEN
+          LOG_REPO_TOKEN: ${{ secrets.LOG_REPO_TOKEN }}
+        run: printf '%s' "$LOG_REPO_TOKEN" | npx --yes wrangler@3 secret put LOG_REPO_TOKEN
       - name: Set per-person access codes
         if: env.CF_TOKEN != '' && env.HAS_ACCESS_CODES == 'true'
         working-directory: worker
@@ -72,5 +72,5 @@ jobs:
       - name: Optional features status
         if: env.CF_TOKEN != ''
         run: |
-          echo "Transcript logging: ${{ env.HAS_LOG_TOKEN == 'true' && 'ON' || 'off (add GITHUB_LOG_TOKEN)' }}"
+          echo "Transcript logging: ${{ env.HAS_LOG_TOKEN == 'true' && 'ON' || 'off (add LOG_REPO_TOKEN)' }}"
           echo "Per-person codes:   ${{ env.HAS_ACCESS_CODES == 'true' && 'ON' || 'off (add ACCESS_CODES)' }}"

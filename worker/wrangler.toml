@@ -16,4 +16,4 @@ OWNER_NAME = "Deepesh"           # name recorded for ACCESS_CODE (admin)
 #   npx wrangler secret put DIRECTLINE_SECRET
 #   npx wrangler secret put ACCESS_CODE        (owner, admin)
 #   npx wrangler secret put ACCESS_CODES       (optional JSON: {"code":"Name"} or {"code":{"name":"Name","admin":true}})
-#   npx wrangler secret put GITHUB_LOG_TOKEN   (optional - enables transcript logging + history)
+#   npx wrangler secret put LOG_REPO_TOKEN   (optional - enables transcript logging + history)

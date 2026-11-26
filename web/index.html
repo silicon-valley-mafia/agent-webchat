@@ -61,6 +61,11 @@
       };
 
       async function getToken(code) {
+        if (!cfg.tokenEndpoint || cfg.tokenEndpoint.indexOf("REPLACE_WITH") === 0) {
+          var e = new Error("Not configured yet: the TOKEN_ENDPOINT repo variable is not set (then re-run the Pages workflow).");
+          e.code = "not_configured";
+          throw e;
+        }
         var res = await fetch(cfg.tokenEndpoint, {
           method: "POST",
           headers: { "X-Access-Code": code }

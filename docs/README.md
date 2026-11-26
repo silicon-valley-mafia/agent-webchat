@@ -1,6 +1,6 @@
 # agent-webchat
 
-A web chat for the Copilot Studio agent `nauto22_githubagent_Zlk0_w`, hosted on GitHub Pages at
+A web chat for the Copilot Studio GitHub agent, hosted on GitHub Pages at
 **https://silicon-valley-mafia.github.io/agent-webchat/**. It talks to the agent over **Direct Line** (no Microsoft sign-in), sits behind
 per-person access codes, and saves every conversation to the private repo `silicon-valley-mafia/agent-webchat-logs`.
 

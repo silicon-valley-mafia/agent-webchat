@@ -17,6 +17,9 @@ header button { background: transparent; color: var(--header-text); border: 1px 
 header button:hover { border-color: #d1d5db; }
 header button:disabled { opacity: .5; cursor: default; }
 #logstate { font-size: 12px; color: #9ca3af; min-width: 56px; text-align: right; }
+#upstate { font-size: 12px; color: #9ca3af; max-width: 260px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+#dropzone { position: absolute; inset: 0; z-index: 20; background: rgba(37, 99, 235, .12); border: 3px dashed #2563eb; display: flex; align-items: center; justify-content: center; pointer-events: none; }
+#dropzone div { background: var(--panel); color: var(--text); padding: 14px 20px; border-radius: 10px; font-size: 16px; box-shadow: 0 2px 12px rgba(0,0,0,.2); }
 #notice { background: #fef3c7; color: #92400e; padding: 6px 12px; font-size: 13px; }
 [data-theme="dark"] #notice { background: #422006; color: #fde68a; }
 #gate { margin: auto; padding: 24px; text-align: center; }

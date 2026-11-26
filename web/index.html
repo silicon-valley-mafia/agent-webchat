@@ -24,10 +24,13 @@
   <div id="app">
     <header>
       <h1 id="title">Agent</h1>
-      <button id="newchat" style="display:none">New chat</button>
+      <span>
+        <button id="newchat" style="display:none">New chat</button>
+        <button id="forget" style="display:none" title="Remove the saved access code from this browser">Forget code</button>
+      </span>
     </header>
     <form id="gate">
-      <p>Enter the access code to start a conversation.</p>
+      <p>Enter the access code to start a conversation.<br /><small>It is remembered in this browser, so you only type it once.</small></p>
       <input id="code" type="password" autocomplete="current-password" placeholder="Access code" required />
       <button type="submit">Start</button>
       <div id="status"></div>
@@ -43,6 +46,8 @@
       var statusEl = document.getElementById("status");
       var chatEl = document.getElementById("webchat");
       var newChatBtn = document.getElementById("newchat");
+      var forgetBtn = document.getElementById("forget");
+      var STORE_KEY = "agentAccessCode";
       document.getElementById("title").textContent = cfg.title || "Agent";
       document.title = cfg.title || "Agent Web Chat";
 
@@ -100,6 +105,7 @@
         gate.style.display = "none";
         chatEl.style.display = "block";
         newChatBtn.style.display = "inline-block";
+        forgetBtn.style.display = "inline-block";
         statusEl.textContent = "";
       }
 
@@ -107,15 +113,20 @@
         e.preventDefault();
         var code = codeInput.value;
         start(code).then(function () {
-          sessionStorage.setItem("agentAccessCode", code);
+          localStorage.setItem(STORE_KEY, code);
         }).catch(function (err) {
-          sessionStorage.removeItem("agentAccessCode");
+          localStorage.removeItem(STORE_KEY);
           statusEl.textContent = err.message;
         });
       });
 
+      forgetBtn.addEventListener("click", function () {
+        localStorage.removeItem(STORE_KEY);
+        location.reload();
+      });
+
       newChatBtn.addEventListener("click", function () {
-        var code = sessionStorage.getItem("agentAccessCode");
+        var code = localStorage.getItem(STORE_KEY);
         if (!code) { location.reload(); return; }
         start(code).catch(function (err) {
           chatEl.style.display = "none";
@@ -127,8 +138,15 @@
       if (!cfg.tokenEndpoint || cfg.tokenEndpoint.indexOf("REPLACE_WITH") === 0) {
         statusEl.textContent = "Not configured yet: set tokenEndpoint in config.js.";
       }
-      var saved = sessionStorage.getItem("agentAccessCode");
-      if (saved) { codeInput.value = saved; start(saved).catch(function (err) { statusEl.textContent = err.message; }); }
+      // Auto-start with the remembered code, so opening the page goes straight to chat.
+      var saved = localStorage.getItem(STORE_KEY);
+      if (saved) {
+        codeInput.value = saved;
+        start(saved).catch(function (err) {
+          if (err.code === "bad_access_code") localStorage.removeItem(STORE_KEY);
+          statusEl.textContent = err.message;
+        });
+      }
     })();
   </script>
 </body>

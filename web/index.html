@@ -17,6 +17,7 @@
         <span id="who"></span>
       </div>
       <div class="right">
+        <span id="upstate" title="Attached files being saved to GitHub"></span>
         <span id="logstate" title="Transcript logging status"></span>
         <button id="historybtn" type="button" hidden title="Saved conversations">History</button>
         <button id="newchat" type="button" hidden>New chat</button>
@@ -34,6 +35,7 @@
       <div id="status"></div>
     </form>
     <div id="chatwrap" hidden></div>
+    <div id="dropzone" hidden><div>Drop files to send them to the agent</div></div>
     <section id="history" hidden>
       <div class="head">
         <h2 id="historytitle">Conversation history</h2>
@@ -42,6 +44,7 @@
       <div id="historybody"></div>
     </section>
   </div>
+  <script src="files.js"></script>
   <script src="app.js"></script>
 </body>
 </html>

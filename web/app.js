@@ -8,9 +8,10 @@
     gate: $("gate"), code: $("code"), status: $("status"), chatWrap: $("chatwrap"), who: $("who"),
     newChat: $("newchat"), forget: $("forget"), logState: $("logstate"), history: $("historybtn"),
     download: $("download"), theme: $("theme"), notify: $("notify"), panel: $("history"),
-    panelBody: $("historybody"), panelTitle: $("historytitle"), panelClose: $("historyclose"), notice: $("notice")
+    panelBody: $("historybody"), panelTitle: $("historytitle"), panelClose: $("historyclose"), notice: $("notice"),
+    upState: $("upstate"), drop: $("dropzone")
   };
-  var K = { code: "agentAccessCode", theme: "agentTheme", notify: "agentNotify", last: "agentLastSession" };
+  var K = { code: "agentAccessCode", theme: "agentTheme", notify: "agentNotify", last: "agentLastSession", logged: "agentLogged" };
   var RESUME_MAX_AGE_MS = 24 * 3600 * 1000;
   var LOG_DEBOUNCE_MS = 4000;
   var TITLE = cfg.title || "Agent";
@@ -134,25 +135,165 @@
   }
 
   // ---------------- logging ----------------
+  // The Worker only ever CREATES files: one folder per session, one file per message.
+  // We remember how many messages are already written (per conversation) and send it as `since`.
+  function loggedMap() {
+    try { return JSON.parse(localStorage.getItem(K.logged) || "{}") || {}; } catch (e) { return {}; }
+  }
+  function getLogged(conversationId) { return loggedMap()[conversationId] || 0; }
+  function setLogged(conversationId, n) {
+    var m = loggedMap();
+    m[conversationId] = n;
+    var keys = Object.keys(m);
+    if (keys.length > 100) keys.slice(0, keys.length - 100).forEach(function (k) { delete m[k]; });
+    localStorage.setItem(K.logged, JSON.stringify(m));
+  }
   function saveLog(s, opts) {
     if (!s || !s.conversationId || s.loggingDisabled) return Promise.resolve();
+    if (s.saving && !(opts && opts.keepalive)) { s.dirty = true; return s.saving; }
     s.dirty = false;
     setLogState("Saving…");
-    return fetch(base + "/log", {
+    var p = fetch(base + "/log", {
       method: "POST", keepalive: !!(opts && opts.keepalive),
       headers: { "X-Access-Code": s.code, "Content-Type": "application/json" },
-      body: JSON.stringify({ conversationId: s.conversationId })
+      body: JSON.stringify({ conversationId: s.conversationId, userId: s.userId, since: getLogged(s.conversationId) })
     }).then(function (r) { return r.json(); }).then(function (j) {
-      if (j.logged) setLogState("Saved ✓");
-      else if (j.reason === "logging_disabled") { s.loggingDisabled = true; setLogState(""); }
+      if (j.logged) {
+        setLogged(s.conversationId, j.total);
+        if (j.more) { s.dirty = true; setLogState("Saving…"); }
+        else setLogState(s.dirty ? "Saving…" : "Saved ✓");
+      } else if (j.reason === "logging_disabled") { s.loggingDisabled = true; setLogState(""); }
       else if (j.reason === "empty") setLogState("");
-      else { s.dirty = true; setLogState("Not saved"); }
-    }).catch(function () { s.dirty = true; setLogState("Not saved"); });
+      else {
+        if (typeof j.total === "number") setLogged(s.conversationId, j.total);
+        s.dirty = true; setLogState("Not saved");
+      }
+      return j;
+    }).catch(function () { s.dirty = true; setLogState("Not saved"); })
+      .then(function (j) {
+        s.saving = null;
+        // more pages to write, or new messages arrived while saving: go again (not after errors)
+        if (s.dirty && j && j.logged && current === s) scheduleLog(s, 300);
+      });
+    s.saving = p;
+    return p;
   }
-  function scheduleLog(s) {
+  function scheduleLog(s, delay) {
     s.dirty = true;
     clearTimeout(s.logTimer);
-    s.logTimer = setTimeout(function () { saveLog(s); }, LOG_DEBOUNCE_MS);
+    s.logTimer = setTimeout(function () { saveLog(s); }, delay === undefined ? LOG_DEBOUNCE_MS : delay);
+  }
+
+  // ---------------- attachments ----------------
+  // Every outgoing message with files passes through here (paperclip, paste, drag & drop):
+  //  1. the original is committed to the artifact repo in the background (Worker /artifact),
+  //  2. what the agent receives is adapted to its limits (zip / zip parts, max 4 MB per message),
+  //  3. a short note tells the agent what was changed and where the original is.
+  var F = window.AgentFiles;
+  var uploads = { active: 0, queue: Promise.resolve() };
+  function setUpState(t) { if (el.upState) el.upState.textContent = t || ""; }
+
+  function attachmentFiles(act) {
+    return Promise.all((act.attachments || []).map(function (a) {
+      var url = String(a.contentUrl || "");
+      if (!/^(blob|data):/.test(url)) return Promise.resolve({ keep: a });
+      return fetch(url).then(function (r) { return r.blob(); }).then(function (b) {
+        return { file: new File([b], a.name || "file", { type: a.contentType || b.type || "" }) };
+      });
+    }));
+  }
+
+  function queueArtifact(s, file, art) {
+    uploads.active++;
+    uploads.queue = uploads.queue.then(function () {
+      return F.uploadArtifact({ base: base, code: s.code, conversationId: s.conversationId }, file, art, setUpState);
+    }).then(function (res) {
+      if (!res.ok) notice("Saving " + file.name + " to GitHub was incomplete (" + res.saved + "/" + res.parts + " parts). The chat copy is unaffected.");
+    }).catch(function (e) { notice("Saving " + file.name + " to GitHub failed: " + e.message); })
+      .then(function () { uploads.active--; setUpState(uploads.active ? "Saving files…" : "Files saved ✓"); });
+  }
+
+  /** -> [{text, attachments}], one entry per message to post (first one replaces the user's message). */
+  function prepareOutgoing(s, act) {
+    var lim = F.limits(cfg);
+    var saving = cfg.saveAttachments !== false && s.conversationId;
+    setUpState("Preparing files…");
+    return attachmentFiles(act).then(function (list) {
+      var keep = [], notes = [], items = [];
+      return list.reduce(function (p, x) {
+        return p.then(function () {
+          if (x.keep) { keep.push(x.keep); return; }
+          var f = x.file;
+          var art = saving ? F.beginArtifact({ base: base, code: s.code, conversationId: s.conversationId }, f).catch(function (e) {
+            notice("Not saved to GitHub: " + f.name + " (" + (e.code === "too_large" ? "larger than the Worker's ARTIFACT_MAX_BYTES" : e.message) + ")");
+            return null;
+          }) : Promise.resolve(null);
+          return Promise.all([F.planDelivery(f, lim), art]).then(function (v) {
+            var plan = v[0], a = v[1];
+            if (a) queueArtifact(s, f, a);
+            var line = F.describe(f, plan, a);
+            if (line) notes.push(line);
+            plan.items.forEach(function (it) { items.push(it); });
+          });
+        });
+      }, Promise.resolve()).then(function () {
+        var groups = F.batch(items, lim.maxBytes);
+        var toAtt = function (it) { return { contentType: it.type || "application/octet-stream", contentUrl: URL.createObjectURL(it.blob), name: it.name }; };
+        var note = notes.length ? "📎 Attachment notes (added by the web page):\n" + notes.join("\n") : "";
+        var text = [act.text || "", note].filter(Boolean).join("\n\n");
+        var out = [{ text: text, attachments: keep.concat((groups[0] || []).map(toAtt)) }];
+        groups.slice(1).forEach(function (g, i) {
+          out.push({ text: "(attachments " + (i + 2) + "/" + groups.length + ")", attachments: g.map(toAtt) });
+        });
+        if (!uploads.active) setUpState("");
+        return out;
+      });
+    });
+  }
+
+  /** Web Chat store middleware: rewrites outgoing messages that carry files. */
+  function filesMiddleware(holder) {
+    return function (storeApi) {
+      return function (next) {
+        return function (action) {
+          var act = action && action.type === "DIRECT_LINE/POST_ACTIVITY" && action.payload && action.payload.activity;
+          var s = holder.s;
+          if (!F || !s || !act || !act.attachments || !act.attachments.length || (act.channelData && act.channelData.awPrepared)) return next(action);
+          return prepareOutgoing(s, act).then(function (msgs) {
+            var mark = function (a) { return Object.assign({}, a, { channelData: Object.assign({}, a.channelData, { awPrepared: true }) }); };
+            var first = mark(Object.assign({}, act, msgs[0]));
+            var result = next(Object.assign({}, action, { payload: Object.assign({}, action.payload, { activity: first }) }));
+            msgs.slice(1).forEach(function (m, i) {
+              setTimeout(function () {
+                storeApi.dispatch({ type: "DIRECT_LINE/POST_ACTIVITY", meta: action.meta || { method: "keyboard" }, payload: { activity: mark({ type: "message", text: m.text, attachments: m.attachments }) } });
+              }, 1500 * (i + 1));
+            });
+            return result;
+          }, function (e) {
+            setUpState("");
+            notice("Couldn't prepare the attachments (" + e.message + "); sending them unchanged.");
+            return next(action);
+          });
+        };
+      };
+    };
+  }
+
+  function pastedName(f, i) {
+    if (f.name && f.name !== "image.png") return f.name;
+    var d = new Date(), p = function (n) { return String(n).padStart(2, "0"); };
+    var ext = (/\/(\w+)/.exec(f.type || "") || [0, "png"])[1];
+    return "pasted-" + d.getFullYear() + p(d.getMonth() + 1) + p(d.getDate()) + "-" + p(d.getHours()) + p(d.getMinutes()) + p(d.getSeconds()) + (i ? "-" + i : "") + "." + ext;
+  }
+  /** Paste and drag & drop: send files exactly as the paperclip would (through the middleware). */
+  function sendFiles(files) {
+    if (!current || !current.store || !files.length) return;
+    current.store.dispatch({
+      type: "DIRECT_LINE/POST_ACTIVITY", meta: { method: "keyboard" },
+      payload: { activity: { type: "message", text: "", attachments: files.map(function (f, i) {
+        return { contentType: f.type || "application/octet-stream", contentUrl: URL.createObjectURL(f), name: pastedName(f, i) };
+      }) } }
+    });
   }
 
   // ---------------- sessions ----------------
@@ -185,11 +326,13 @@
     var dlOpts = { token: t.token, domain: t.domain };
     if (resumed) { dlOpts.conversationId = t.conversationId; dlOpts.watermark = ""; dlOpts.webSocket = false; dlOpts.pollingInterval = 1500; }
     var directLine = window.WebChat.createDirectLine(dlOpts);
+    var holder = {};
     var s = {
-      directLine: directLine, store: window.WebChat.createStore ? window.WebChat.createStore() : undefined,
+      directLine: directLine, store: window.WebChat.createStore ? window.WebChat.createStore({}, filesMiddleware(holder)) : undefined,
       subs: [], code: code, conversationId: t.conversationId || null, userId: t.userId || ("dl_" + uuid()),
       name: t.name || "", admin: !!t.admin, startedAt: Date.now(), resumed: !!resumed, logTimer: null, dirty: false
     };
+    holder.s = s;
 
     s.subs.push(directLine.connectionStatus$.subscribe({
       next: function (st) {
@@ -325,6 +468,8 @@
     b.addEventListener("click", onClick);
     return b;
   }
+  /** logs/2026-11-27/0140-deepesh--conv  ->  2026-11-27_0140-deepesh--conv.md */
+  function fileName(item) { return item.path.split("/").slice(1).join("_") + ".md"; }
   function openPanel(title) { el.panelTitle.textContent = title; el.panel.hidden = false; el.panelBody.innerHTML = "<p class='muted'>Loading…</p>"; }
   function closePanel() { el.panel.hidden = true; }
 
@@ -346,7 +491,7 @@
       bar.className = "bar";
       bar.appendChild(button("← Back", function () { showHistory(); }));
       bar.appendChild(button("Continue this chat", function () { continueFrom(j.markdown); }, "primary"));
-      bar.appendChild(button("Download", function () { downloadText(j.markdown, item.path.split("/").slice(1).join("_")); }));
+      bar.appendChild(button("Download", function () { downloadText(j.markdown, fileName(item)); }));
       el.panelBody.appendChild(bar);
       var doc = document.createElement("div");
       doc.className = "transcript";
@@ -373,7 +518,8 @@
         var row = document.createElement("div");
         row.className = "row";
         var label = document.createElement("span");
-        label.textContent = item.time + (current && current.admin ? "  ·  " + item.person : "");
+        label.textContent = item.time + (current && current.admin ? "  ·  " + item.person : "") +
+          "  ·  " + (item.messages || 0) + " msg" + (item.messages === 1 ? "" : "s");
         row.appendChild(label);
         row.appendChild(button("View", function () { showTranscript(item); }));
         row.appendChild(button("Continue", function () {
@@ -381,7 +527,7 @@
             .catch(function (e) { notice(e.message); });
         }));
         row.appendChild(button("⬇", function () {
-          api("/transcript", code, { path: item.path }).then(function (t) { downloadText(t.markdown, item.path.split("/").slice(1).join("_")); })
+          api("/transcript", code, { path: item.path }).then(function (t) { downloadText(t.markdown, fileName(item)); })
             .catch(function (e) { notice(e.message); });
         }));
         el.panelBody.appendChild(row);
@@ -444,6 +590,47 @@
     if (mq.addEventListener) mq.addEventListener("change", onScheme); else if (mq.addListener) mq.addListener(onScheme);
   }
 
+  // Paste images/files into the chat (plain text paste is left alone).
+  document.addEventListener("paste", function (e) {
+    if (!current || el.chatWrap.hidden) return;
+    var cd = e.clipboardData;
+    if (!cd || (cd.getData && cd.getData("text/plain"))) return;
+    var files = [];
+    Array.prototype.forEach.call(cd.items || [], function (it) { if (it.kind === "file") { var f = it.getAsFile(); if (f) files.push(f); } });
+    if (!files.length) return;
+    e.preventDefault();
+    e.stopPropagation();
+    sendFiles(files);
+  }, true);
+
+  // Drag & drop anywhere on the page. Captured before Web Chat sees it, so files are never sent twice.
+  var dragDepth = 0;
+  function hasFiles(e) { var t = e.dataTransfer && e.dataTransfer.types; return !!t && Array.prototype.indexOf.call(t, "Files") >= 0; }
+  window.addEventListener("dragenter", function (e) {
+    if (!hasFiles(e)) return;
+    e.preventDefault(); e.stopPropagation();
+    dragDepth++;
+    if (current && el.drop) el.drop.hidden = false;
+  }, true);
+  window.addEventListener("dragover", function (e) {
+    if (!hasFiles(e)) return;
+    e.preventDefault(); e.stopPropagation();
+    e.dataTransfer.dropEffect = current ? "copy" : "none";
+  }, true);
+  window.addEventListener("dragleave", function (e) {
+    if (!hasFiles(e)) return;
+    e.stopPropagation();
+    dragDepth = Math.max(0, dragDepth - 1);
+    if (!dragDepth && el.drop) el.drop.hidden = true;
+  }, true);
+  window.addEventListener("drop", function (e) {
+    if (!hasFiles(e)) return;
+    e.preventDefault(); e.stopPropagation();
+    dragDepth = 0;
+    if (el.drop) el.drop.hidden = true;
+    if (current) sendFiles(Array.prototype.slice.call(e.dataTransfer.files || []));
+  }, true);
+
   document.addEventListener("visibilitychange", function () {
     if (document.visibilityState === "visible") { unread = 0; document.title = TITLE; return; }
     if (current && current.dirty) { clearTimeout(current.logTimer); saveLog(current, { keepalive: true }); }
@@ -471,5 +658,8 @@
       .catch(handleAuthError);
   }
 
-  window.__agentWebchat = { renderMarkdown: renderMarkdown, parseIds: parseIds, styleOptions: styleOptions };
+  window.__agentWebchat = {
+    renderMarkdown: renderMarkdown, parseIds: parseIds, styleOptions: styleOptions, fileName: fileName,
+    prepareOutgoing: prepareOutgoing, filesMiddleware: filesMiddleware, sendFiles: sendFiles, uploads: uploads
+  };
 })();

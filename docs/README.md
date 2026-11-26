@@ -9,7 +9,7 @@ Browser (GitHub Pages: web/)  ──POST /token, /resume, /log, /export, /histor
                                                                      holds DIRECTLINE_SECRET, ACCESS_CODE(S), LOG_REPO_TOKEN
 Browser ── Bot Framework Web Chat ⇄ Direct Line (single-conversation token) ⇄ agent
 Worker  ── reads conversations from Direct Line, CREATES files (never edits) ──▶ private log repo
-Browser ──POST /artifact, /artifact/put (attachments)──▶ Worker ── streams ──▶ artifacts-10
+Browser ──POST /artifact, /artifact/put (attachments)──▶ Worker ── streams ──▶ agent-webchat-artifcats-1
 ```
 
 ### Log layout (one folder per day, one folder per session, write-only)
@@ -35,7 +35,7 @@ logs/
 | **History** | Lists saved sessions (folders), newest first, with message counts. Admins see everyone; other people see only their own. **View** joins the session's files into one transcript (a single GraphQL read), **Continue** re-attaches to that conversation, and **⬇** downloads it as one Markdown file. |
 | **Download** | **⬇ Download** saves the current chat as Markdown. The Worker renders it from Direct Line, so this works even with logging off. |
 | **Transcript logging** | 4 s after each message (and on New chat or tab hide), the Worker re-reads the conversation from Direct Line and creates one file per new message in the session's folder (see *Log layout*). Parallel-write conflicts (409) are retried. |
-| **Attachments** | Paperclip, **paste** (Ctrl+V an image or copied file) and **drag & drop** anywhere on the page. Each file is adapted to the agent's limits and the original is committed to `artifacts-10`. See *Attachments* below. |
+| **Attachments** | Paperclip, **paste** (Ctrl+V an image or copied file) and **drag & drop** anywhere on the page. Each file is adapted to the agent's limits and the original is committed to `agent-webchat-artifcats-1`. See *Attachments* below. |
 | **Dark mode** | 🌓 button cycles auto → light → dark (saved per browser). Switching re-attaches the open chat in the new theme. |
 | **Avatars & colours** | `accentColor`, `botAvatarInitials`, `botAvatarImage`, `userAvatarImage` in `web/config.js`. User initials default to the person's name. |
 | **Voice input** | Microphone button where the browser supports speech recognition (Chrome, Edge). Set `voice: false` to hide it. |
@@ -54,7 +54,7 @@ Every file you attach (paperclip, paste, drag & drop) goes two ways:
    | Would need more than `agentMaxParts` (10) messages | not sent in chat; the agent gets the GitHub path instead |
 
    A note is added to your message telling the agent what was changed and where the original is.
-2. **To GitHub, untouched.** The original is committed to **`silicon-valley-mafia/artifacts-10`** (create-only, like the logs):
+2. **To GitHub, untouched.** The original is committed to **`silicon-valley-mafia/agent-webchat-artifcats-1`** (create-only, like the logs):
    ```
    webchat-uploads/2026-11-27/deepesh--<conversationId>/030700-ab12/
      report.pdf                     ← whole file, if ≤ 70 MiB
@@ -83,8 +83,8 @@ The Worker never decodes file bytes (the Free plan allows 10 ms CPU per request)
 | `DIRECTLINE_SECRET` | yes | Copilot Studio → Settings → Security → Web channel security → Secret 1 (paste as-is) | long base64-like string |
 | `ACCESS_CODE` | yes | any text, one line, no surrounding spaces. This is the **owner/admin** code (name = `OWNER_NAME` in `wrangler.toml`) | `river-mango-7421-kite` |
 | `ACCESS_CODES` | no | **JSON object**: code → name, or code → `{"name": "...", "admin": true}` | see below |
-| `LOG_REPO_TOKEN` | no | fine-grained PAT, `github_pat_…`, repositories **agent-webchat-logs and artifacts-10**, permission **Contents: Read and write** | `github_pat_11ABC…` |
-| `ARTIFACT_REPO_TOKEN` | no | only if artifacts-10 should use a different PAT than `LOG_REPO_TOKEN` (same format, Contents: Read and write on artifacts-10) | `github_pat_11XYZ…` |
+| `LOG_REPO_TOKEN` | no | fine-grained PAT, `github_pat_…`, repositories **agent-webchat-logs and agent-webchat-artifcats-1**, permission **Contents: Read and write** | `github_pat_11ABC…` |
+| `ARTIFACT_REPO_TOKEN` | no | only if agent-webchat-artifcats-1 should use a different PAT than `LOG_REPO_TOKEN` (same format, Contents: Read and write on agent-webchat-artifcats-1) | `github_pat_11XYZ…` |
 
 Rules for codes:
 - Use 16+ characters; letters, digits and `-` are safest (they are typed into a password box and sent in an HTTP header, so **no line breaks**; avoid non-ASCII).
@@ -120,7 +120,7 @@ Add a repo secret **`ACCESS_CODES`** containing a JSON object, then run **Token 
    - `DIRECTLINE_SECRET`
    - `ACCESS_CODE`
    - optional: `ACCESS_CODES`
-   - optional: `LOG_REPO_TOKEN`, a fine-grained PAT with `agent-webchat-logs` and `artifacts-10` selected and **Contents: Read and write**
+   - optional: `LOG_REPO_TOKEN`, a fine-grained PAT with `agent-webchat-logs` and `agent-webchat-artifcats-1` selected and **Contents: Read and write**
 3. **Actions → Token Worker - test and deploy → Run workflow.** Then check
    `https://agent-webchat-token.deepeshj-2k6.workers.dev/health`, which should show `{"ok":true,"configured":true,"logging":true,"artifacts":true,"people":N}`.
 4. **Settings → Pages → Source: GitHub Actions.** The token endpoint is set in `web/config.js`.
@@ -142,3 +142,4 @@ cd worker && node --test test/*.test.js   # 82 tests, no network (files.test.js 
 | `worker/test/*.test.js` | 82 tests: auth, rate limits, write-only logging, chunking, conflicts, history ACL, path validation, resume, secret non-leakage, attachment paths/streaming/manifests, ZIP round-trips |
 | `.github/workflows/pages.yml` | Deploys `web/` to Pages |
 | `.github/workflows/worker.yml` | Tests and deploys the Worker, plus the optional secrets when present |
+| `docs/TODO.md` | Future work: stream replies from the log, GitHub PR pop-up support, "show thinking", steer/interrupt test, remove the 1 GiB attachment cap |

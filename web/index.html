@@ -1,0 +1,135 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="referrer" content="no-referrer" />
+  <title>Agent Web Chat</title>
+  <script src="config.js"></script>
+  <script crossorigin="anonymous" src="https://cdn.botframework.com/botframework-webchat/latest/webchat.js"></script>
+  <style>
+    html, body { height: 100%; margin: 0; font-family: system-ui, sans-serif; background: #f3f4f6; }
+    #app { display: flex; flex-direction: column; height: 100%; max-width: 900px; margin: 0 auto; background: #fff; box-shadow: 0 0 12px rgba(0,0,0,.08); }
+    header { padding: 12px 16px; background: #24292f; color: #fff; display: flex; justify-content: space-between; align-items: center; }
+    header h1 { font-size: 16px; margin: 0; }
+    header button { background: transparent; color: #fff; border: 1px solid #888; border-radius: 6px; padding: 4px 10px; cursor: pointer; }
+    #gate { margin: auto; padding: 24px; text-align: center; }
+    #gate input { padding: 8px; font-size: 15px; width: 220px; }
+    #gate button { padding: 8px 14px; font-size: 15px; margin-left: 6px; cursor: pointer; }
+    #status { color: #b91c1c; min-height: 1.2em; margin-top: 10px; font-size: 14px; }
+    #webchat { flex: 1; min-height: 0; display: none; }
+  </style>
+</head>
+<body>
+  <div id="app">
+    <header>
+      <h1 id="title">Agent</h1>
+      <button id="newchat" style="display:none">New chat</button>
+    </header>
+    <form id="gate">
+      <p>Enter the access code to start a conversation.</p>
+      <input id="code" type="password" autocomplete="current-password" placeholder="Access code" required />
+      <button type="submit">Start</button>
+      <div id="status"></div>
+    </form>
+    <div id="webchat" role="main"></div>
+  </div>
+
+  <script>
+    (function () {
+      var cfg = window.AGENT_WEBCHAT_CONFIG || {};
+      var gate = document.getElementById("gate");
+      var codeInput = document.getElementById("code");
+      var statusEl = document.getElementById("status");
+      var chatEl = document.getElementById("webchat");
+      var newChatBtn = document.getElementById("newchat");
+      document.getElementById("title").textContent = cfg.title || "Agent";
+      document.title = cfg.title || "Agent Web Chat";
+
+      var MESSAGES = {
+        bad_access_code: "Wrong access code.",
+        rate_limited: "Too many attempts - wait a minute and try again.",
+        origin_not_allowed: "This page's origin is not allowed by the token service.",
+        server_not_configured: "Token service is missing its secrets.",
+        directline_error: "The agent's Direct Line service rejected the request (check the secret / region).",
+        directline_unreachable: "Could not reach Direct Line."
+      };
+
+      async function getToken(code) {
+        var res = await fetch(cfg.tokenEndpoint, {
+          method: "POST",
+          headers: { "X-Access-Code": code }
+        });
+        var body = {};
+        try { body = await res.json(); } catch (e) {}
+        if (!res.ok) {
+          var err = new Error(MESSAGES[body.error] || ("Token request failed (" + res.status + ")"));
+          err.code = body.error;
+          throw err;
+        }
+        return body;
+      }
+
+      async function start(code) {
+        statusEl.textContent = "Connecting...";
+        var t = await getToken(code);
+        var directLine = window.WebChat.createDirectLine({ token: t.token, domain: t.domain });
+
+        // Ask the agent to send its greeting once connected (Copilot Studio pattern).
+        var sub = directLine.connectionStatus$.subscribe({
+          next: function (s) {
+            if (s === 2) {
+              directLine.postActivity({
+                type: "event",
+                name: "startConversation",
+                locale: cfg.locale || "en-US",
+                localTimezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+                from: { id: t.userId }
+              }).subscribe();
+              sub.unsubscribe();
+            }
+          }
+        });
+
+        chatEl.innerHTML = "";
+        window.WebChat.renderWebChat(
+          { directLine: directLine, userID: t.userId, locale: cfg.locale || "en-US",
+            styleOptions: { hideUploadButton: true, bubbleBorderRadius: 8 } },
+          chatEl
+        );
+        gate.style.display = "none";
+        chatEl.style.display = "block";
+        newChatBtn.style.display = "inline-block";
+        statusEl.textContent = "";
+      }
+
+      gate.addEventListener("submit", function (e) {
+        e.preventDefault();
+        var code = codeInput.value;
+        start(code).then(function () {
+          sessionStorage.setItem("agentAccessCode", code);
+        }).catch(function (err) {
+          sessionStorage.removeItem("agentAccessCode");
+          statusEl.textContent = err.message;
+        });
+      });
+
+      newChatBtn.addEventListener("click", function () {
+        var code = sessionStorage.getItem("agentAccessCode");
+        if (!code) { location.reload(); return; }
+        start(code).catch(function (err) {
+          chatEl.style.display = "none";
+          gate.style.display = "block";
+          statusEl.textContent = err.message;
+        });
+      });
+
+      if (!cfg.tokenEndpoint || cfg.tokenEndpoint.indexOf("REPLACE_WITH") === 0) {
+        statusEl.textContent = "Not configured yet: set tokenEndpoint in config.js.";
+      }
+      var saved = sessionStorage.getItem("agentAccessCode");
+      if (saved) { codeInput.value = saved; start(saved).catch(function (err) { statusEl.textContent = err.message; }); }
+    })();
+  </script>
+</body>
+</html>

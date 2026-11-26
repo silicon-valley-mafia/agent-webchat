@@ -1,0 +1,46 @@
+name: Deploy web chat to GitHub Pages
+
+on:
+  push:
+    branches: [main]
+    paths: ["web/**", ".github/workflows/pages.yml"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v4
+
+      # Optional: set repo variable TOKEN_ENDPOINT (Settings > Secrets and variables >
+      # Actions > Variables) to inject the Worker URL instead of editing config.js.
+      - name: Inject token endpoint
+        env:
+          TOKEN_ENDPOINT: ${{ vars.TOKEN_ENDPOINT }}
+        run: |
+          if [ -n "$TOKEN_ENDPOINT" ]; then
+            sed -i "s#REPLACE_WITH_WORKER_URL/token#${TOKEN_ENDPOINT}#" web/config.js
+            echo "tokenEndpoint set from repo variable"
+          else
+            echo "TOKEN_ENDPOINT variable not set; using web/config.js as committed"
+          fi
+          grep tokenEndpoint web/config.js
+
+      - uses: actions/configure-pages@v5
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: web
+      - id: deployment
+        uses: actions/deploy-pages@v4

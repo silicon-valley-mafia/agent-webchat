@@ -32,7 +32,7 @@
     directline_error: "The agent's Direct Line service rejected the request (check the secret / region).",
     directline_unreachable: "Could not reach Direct Line.",
     conversation_expired: "That conversation has expired on Microsoft's side. You can still view or download its transcript.",
-    logging_disabled: "Transcript logging is not enabled on the Worker (GITHUB_LOG_TOKEN not set).",
+    logging_disabled: "Transcript logging is not enabled on the Worker (LOG_REPO_TOKEN not set).",
     forbidden: "That transcript belongs to someone else.",
     not_found: "Transcript not found.",
     not_configured: "Not configured yet: set tokenEndpoint in web/config.js."

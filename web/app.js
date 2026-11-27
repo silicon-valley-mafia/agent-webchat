@@ -13,12 +13,44 @@
     panelBody: $("historybody"), panelTitle: $("historytitle"), panelClose: $("historyclose"), notice: $("notice"),
     noticeText: $("noticetext"), noticeClose: $("noticeclose"),
     upState: $("upstate"), drop: $("dropzone"), clear: $("clearchat"), session: $("sessionbtn"), width: $("widthbtn"),
-    expandAll: $("expandall"), work: $("workstate"), staged: $("staged")
+    expandAll: $("expandall"), work: $("workstate"), staged: $("staged"), skin: $("skinbtn")
   };
   var K = {
     code: "agentAccessCode", theme: "agentTheme", notify: "agentNotify", last: "agentLastSession", logged: "agentLogged",
-    width: "agentWidth", cleared: "agentCleared", collapse: "agentCollapse:"
+    width: "agentWidth", cleared: "agentCleared", collapse: "agentCollapse:", skin: "agentSkin", draft: "agentDraft:"
   };
+  /**
+   * TODO #26: skins. Each skin = CSS variables in app.css ([data-skin]) + Web Chat styleOptions overrides here
+   * ("all" first, then the light/dark part). Inspired-by layouts only - no logos or product names.
+   */
+  var SKINS = {
+    classic: { label: "Classic" },
+    focus: {
+      label: "Focus (centered, no reply bubbles)",
+      all: {
+        bubbleBackground: "transparent", bubbleBorderWidth: 0, bubbleBorderRadius: 0,
+        bubbleFromUserBorderWidth: 0, bubbleFromUserBorderRadius: 18,
+        botAvatarInitials: "", botAvatarImage: undefined, userAvatarInitials: "", userAvatarImage: undefined
+      },
+      light: { bubbleFromUserBackground: "#eef0f3", bubbleFromUserTextColor: "#111827", bubbleTextColor: "#111827" },
+      dark: { bubbleFromUserBackground: "#1f2937", bubbleFromUserTextColor: "#e5e7eb", bubbleTextColor: "#e5e7eb" }
+    },
+    contrast: {
+      label: "High contrast",
+      all: { bubbleBorderWidth: 2, bubbleFromUserBorderWidth: 2, bubbleBorderRadius: 4, bubbleFromUserBorderRadius: 4 },
+      light: {
+        accent: "#0000cc", backgroundColor: "#ffffff", bubbleBackground: "#ffffff", bubbleTextColor: "#000000", bubbleBorderColor: "#000000",
+        bubbleFromUserBackground: "#0000cc", bubbleFromUserTextColor: "#ffffff", bubbleFromUserBorderColor: "#000000",
+        subtle: "#1f2937", timestampColor: "#1f2937", sendBoxTextColor: "#000000", sendBoxBackground: "#ffffff", sendBoxBorderTop: "solid 2px #000000"
+      },
+      dark: {
+        accent: "#ffff00", backgroundColor: "#000000", bubbleBackground: "#000000", bubbleTextColor: "#ffffff", bubbleBorderColor: "#ffffff",
+        bubbleFromUserBackground: "#ffff00", bubbleFromUserTextColor: "#000000", bubbleFromUserBorderColor: "#ffffff",
+        subtle: "#e5e7eb", timestampColor: "#e5e7eb", sendBoxTextColor: "#ffffff", sendBoxBackground: "#000000", sendBoxBorderTop: "solid 2px #ffffff"
+      }
+    }
+  };
+  var SKIN_ORDER = ["classic", "focus", "contrast"];
   var RESUME_MAX_AGE_MS = 24 * 3600 * 1000;
   var LOG_DEBOUNCE_MS = 4000;
   var TITLE = cfg.title || "Agent";
@@ -94,6 +126,15 @@
     el.theme.title = "Theme: " + m + " (click to change)";
     document.documentElement.setAttribute("data-theme", effectiveTheme());
   }
+  function skinMode() {
+    var m = localStorage.getItem(K.skin) || cfg.skin || "classic";
+    return SKINS[m] ? m : "classic";
+  }
+  function paintSkin() {
+    var m = skinMode();
+    document.documentElement.setAttribute("data-skin", m);
+    if (el.skin) el.skin.title = "Skin: " + SKINS[m].label + " (click to change)";
+  }
   // TODO #15: fluid width by default; the ↔ button switches to a centred narrow column (remembered per browser).
   function widthMode() { return localStorage.getItem(K.width) || cfg.layout || "wide"; }
   function paintWidth() {
@@ -134,6 +175,9 @@
       o.suggestedActionBackground = "#1e293b"; o.suggestedActionBackgroundColor = "#1e293b";
       o.transcriptOverlayButtonBackground = "#334155"; o.transcriptOverlayButtonColor = "#e5e7eb";
     }
+    var sk = SKINS[skinMode()];
+    if (sk.all) Object.assign(o, sk.all);
+    if (sk[effectiveTheme()]) Object.assign(o, sk[effectiveTheme()]);
     return o;
   }
 
@@ -411,6 +455,17 @@
   function sendBoxText(s) {
     try { var st = s.store.getState(); return String(st.sendBoxValue || ""); } catch (e) { return ""; }
   }
+  // P11: drafts live in sessionStorage (this tab only), keyed by conversation; empty text removes the entry.
+  function saveDraft(s, text) {
+    if (!s || !s.conversationId) return;
+    try {
+      if (text && String(text).trim()) sessionStorage.setItem(K.draft + s.conversationId, String(text));
+      else sessionStorage.removeItem(K.draft + s.conversationId);
+    } catch (e) {}
+  }
+  function loadDraft(conversationId) {
+    try { return conversationId ? sessionStorage.getItem(K.draft + conversationId) || "" : ""; } catch (e) { return ""; }
+  }
   /** "Send" button: whatever is typed + the staged files, as ONE message. */
   function sendStaged() {
     var s = current;
@@ -485,9 +540,24 @@
     paintWork();
   }
   function markReplied(s) {
+    clearTimeout(s.replyTimer);
+    s.replyTimer = null;
     s.pendingSince = 0;
     s.queued = 0;
     if (s === current) paintWork();
+  }
+  // P7: Copilot Studio often answers one turn with several messages (typing -> message -> typing -> message).
+  // Keep "working" until the agent has been quiet for a moment instead of clearing on the first message.
+  var REPLY_QUIET_MS = 3000, TYPING_GRACE_MS = 20000;
+  function agentMessage(s) {
+    if (!s.pendingSince) return;
+    clearTimeout(s.replyTimer);
+    s.replyTimer = setTimeout(function () { markReplied(s); }, REPLY_QUIET_MS);
+  }
+  function agentTyping(s) {
+    if (!s.pendingSince || !s.replyTimer) return; // only after a first reply of this turn
+    clearTimeout(s.replyTimer);
+    s.replyTimer = setTimeout(function () { markReplied(s); }, TYPING_GRACE_MS);
   }
 
   // ---------------- store middleware ----------------
@@ -498,6 +568,9 @@
         return function (action) {
           var s = holder.s;
           var type = action && action.type;
+
+          // P11: remember the typed draft per conversation (survives 🌓 / skin re-attach and a page refresh in this tab)
+          if (type === "WEB_CHAT/SET_SEND_BOX" && s && action.payload) saveDraft(s, action.payload.text);
 
           // Web Chat 4.16+ (default sendAttachmentOn: "send"): the paperclip fills Web Chat's OWN attachment bar.
           // Move those files to our chips so there is one list, one Send path and the zip/split/artifact logic applies.
@@ -855,6 +928,7 @@
     if (!s) return;
     clearTimeout(s.logTimer);
     clearTimeout(s.decorateTimer);
+    clearTimeout(s.replyTimer);
     if (s.observer) try { s.observer.disconnect(); } catch (e) {}
     if (flush && s.dirty) saveLog(s);
     s.subs.forEach(function (x) { try { x.unsubscribe(); } catch (e) {} });
@@ -871,6 +945,8 @@
 
   function startWith(code, t, resumed) {
     var previous = current;
+    // P11: re-attaching the same conversation (🌓, skin) keeps what was typed
+    var carry = previous && previous.conversationId && previous.conversationId === t.conversationId ? sendBoxText(previous) : "";
     current = null;
     stopSession(previous, true);
 
@@ -902,12 +978,13 @@
       next: function (a) {
         if (!a) return;
         if (a.conversation && a.conversation.id) s.conversationId = a.conversation.id;
+        if (a.type === "typing" && !mine(s, a)) { agentTyping(s); return; }
         if (a.type !== "message") return;
         var old = a.timestamp && Date.parse(a.timestamp) < s.startedAt - 5000;
         if (!old) scheduleLog(s);
         rememberSession(s);
         var isMine = mine(s, a);
-        if (!isMine && !old) { maybeNotify(s, a); markReplied(s); }
+        if (!isMine && !old) { maybeNotify(s, a); agentMessage(s); }
         scheduleDecorate(s);
       }
     }));
@@ -919,6 +996,8 @@
     hookMic(s);
     hookStagedSubmit(s);
     renderChat(s);
+    var draft = carry || loadDraft(s.conversationId);
+    if (draft && s.store) s.store.dispatch({ type: "WEB_CHAT/SET_SEND_BOX", payload: { text: draft } });
     if (window.MutationObserver) {
       s.observer = new MutationObserver(function () { scheduleDecorate(s); });
       s.observer.observe(s.mount, { childList: true, subtree: true });
@@ -1149,6 +1228,12 @@
     localStorage.setItem(K.theme, order[(order.indexOf(themeMode()) + 1) % order.length]);
     applyTheme();
   });
+  if (el.skin) el.skin.addEventListener("click", function () {
+    localStorage.setItem(K.skin, SKIN_ORDER[(SKIN_ORDER.indexOf(skinMode()) + 1) % SKIN_ORDER.length]);
+    paintSkin();
+    notice("Skin: " + SKINS[skinMode()].label, { autoHideMs: 4000 });
+    applyTheme(); // re-attach so Web Chat picks up the skin's styleOptions (same conversation, draft kept)
+  });
   el.notify.addEventListener("click", function () {
     if (notifyOn()) { localStorage.setItem(K.notify, "off"); paintNotify(); return; }
     Promise.resolve(Notification.requestPermission()).then(function (p) {
@@ -1219,6 +1304,7 @@
   });
 
   paintThemeButton();
+  paintSkin();
   paintWidth();
   paintNotify();
   watchMicPermission();
@@ -1247,6 +1333,7 @@
     prepareOutgoing: prepareOutgoing, filesMiddleware: filesMiddleware, storeMiddleware: storeMiddleware, sendFiles: sendFiles,
     uploads: uploads, staged: function () { return staged.slice(); }, stageFiles: stageFiles, sendStaged: sendStaged,
     stagedOnlySubmit: stagedOnlySubmit, isAgentError: isAgentError, clearMarker: clearMarker,
+    skins: SKINS, skinMode: skinMode, loadDraft: loadDraft, markSent: markSent, agentMessage: agentMessage, agentTyping: agentTyping,
     decorate: function () { decorate(current); }, activityMiddleware: activityMiddleware, clearChat: clearChat
   };
 })();

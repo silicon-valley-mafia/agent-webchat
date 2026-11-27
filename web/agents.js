@@ -11,7 +11,8 @@
   var cfg = root.AGENT_WEBCHAT_CONFIG || {};
   var K = { sel: "agentSelected", map: "agentConvAgent" };
   var MAP_MAX = 300;
-  var DL_PATHS = { "/token": 1, "/resume": 1, "/log": 1, "/export": 1 };
+  // TODO #20: uploads also name the agent, so they go to webchat-uploads/<agent number>/ like the logs
+  var DL_PATHS = { "/token": 1, "/resume": 1, "/log": 1, "/export": 1, "/artifact": 1, "/artifact/put": 1 };
 
   /** Pure: Worker path ("/token") of a request URL, or "" if it isn't a Worker call. */
   function pathOf(url, base) {
@@ -34,6 +35,13 @@
     if (typeof body !== "string" || body.indexOf("conversationId") < 0) return "";
     try { var j = JSON.parse(body); return typeof j.conversationId === "string" ? j.conversationId : ""; } catch (e) { return ""; }
   }
+  /** Pure: conversation id from a URL query (?conversationId=...), or "". /artifact/put carries it there; its body is
+   * the file itself and is never parsed. */
+  function convOfUrl(url) {
+    var m = /[?&]conversationId=([^&#]*)/.exec(String(url || ""));
+    if (!m) return "";
+    try { return decodeURIComponent(m[1]); } catch (e) { return ""; }
+  }
   function remember(map, conversationId, agentId) {
     if (!conversationId || !agentId) return map;
     delete map[conversationId];
@@ -43,7 +51,7 @@
     return map;
   }
 
-  var api = { pathOf: pathOf, agentFor: agentFor, convOf: convOf, remember: remember };
+  var api = { pathOf: pathOf, agentFor: agentFor, convOf: convOf, convOfUrl: convOfUrl, remember: remember };
   root.AgentAgents = api;
   var doc = root.document;
   if (!doc || !root.fetch || cfg.multiAgent === false) return;
@@ -146,7 +154,7 @@
     var code = headerOf(init, "X-Access-Code");
     return load(code).then(function () {
       if (!st.enabled) return origFetch.apply(self, args);
-      var conv = convOf(init && init.body);
+      var conv = path === "/artifact/put" ? convOfUrl(url) : convOf(init && init.body);
       var id = agentFor(path, conv, getMap(), ls(K.sel), st.ids);
       if (!id) return origFetch.apply(self, args);
       var headers = new Headers((init && init.headers) || {});

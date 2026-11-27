@@ -1,0 +1,47 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="light">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="referrer" content="no-referrer" />
+  <title>Group chat (experimental) - Agent Web Chat</title>
+  <link rel="stylesheet" href="group.css" />
+  <script src="config.js"></script>
+  <script crossorigin="anonymous" src="https://cdn.botframework.com/botframework-webchat/4.19.2/webchat.js"></script>
+  <script>window.WebChat || document.write('<script crossorigin="anonymous" src="https://cdn.botframework.com/botframework-webchat/latest/webchat.js"><\/script>');</script>
+</head>
+<body>
+  <div id="grp">
+    <header>
+      <h1>🧪 Group chat <small>experimental</small></h1>
+      <nav>
+        <button id="gnew" type="button" title="Pick agents again (ends this group)">New group</button>
+        <button id="gdown" type="button" title="Download every agent's replies as one Markdown file">⬇ Download</button>
+        <a href="./" title="Back to the normal chat">← Main chat</a>
+      </nav>
+    </header>
+    <div id="gnotice" hidden role="status"></div>
+    <form id="ggate" hidden>
+      <p>Enter your access code.</p>
+      <input id="gcode" type="password" autocomplete="current-password" placeholder="Access code" required />
+      <button type="submit">Continue</button>
+    </form>
+    <section id="gpick" hidden>
+      <p id="gpickhelp"></p>
+      <div id="gagents" role="group" aria-label="Agents"></div>
+      <button id="gstart" type="button" disabled>Start group</button>
+    </section>
+    <section id="gchat" hidden>
+      <div id="gtabs" role="tablist" aria-label="Agents"></div>
+      <div id="gcols"></div>
+    </section>
+    <div id="gcompose" hidden>
+      <select id="gto" aria-label="Send to"></select>
+      <textarea id="gtext" rows="2" placeholder="One prompt to every agent - Enter sends, Shift+Enter adds a line"></textarea>
+      <button id="gsend" type="button">Send</button>
+    </div>
+  </div>
+  <script src="turns.js"></script>
+  <script src="group.js"></script>
+</body>
+</html>

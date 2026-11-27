@@ -35,6 +35,7 @@ window.AGENT_WEBCHAT_CONFIG = {
   groupMaxAgents: 4,          // most agents in one group (2-6); every prompt costs one agent turn per agent
   sessionRail: true,          // web/rail.js - ☰ Chats sidebar: several conversations (any agent) stay open, switch instantly (TODO #23)
   liveSessions: 4,            // conversations kept connected at once in one tab (current + 3); the oldest idle one closes first
+  sendRole: true,             // web/role.js - tell the agent the code's role (owner/admin/user/readOnly) at chat start; advisory (TODO #7)
 
   // Session panel (ⓘ) links - private repos, links only work for people with access
   logTimeZone: "Asia/Kolkata",

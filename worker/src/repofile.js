@@ -7,7 +7,8 @@
  *
  * Allow-list (who may read what), never from the request:
  *   - owner code (ACCESS_CODE): Worker secret OWNER_FILES = JSON array of "owner/repo/" or "owner/repo/prefix/";
- *   - other codes: "files": [...] in their ACCESS_CODES entry; no entry = nothing (owner decision 2026-11-27).
+ *   - other codes: "files": [...] in their ACCESS_CODES entry; no entry = nothing (owner decision 2026-11-27);
+ *   - TODO #51: "files" in the person's entry in the config branch (src/config.js) replaces both (main.js passes it).
  * Token: Worker secret FILE_READ_TOKEN - a fine-grained PAT with Contents: READ only on those repos. Without it the
  *   route answers {error: "file_disabled"}. LOG_REPO_TOKEN is never used here (it can write).
  * Limits: text files only, FILE_MAX_BYTES (default 30720 = 30 KB), no "..", no ".github/", 1 GitHub request per call.
@@ -74,11 +75,14 @@ function decodeB64Utf8(b64) {
   return new TextDecoder("utf-8", { fatal: false }).decode(bytes);
 }
 
-/** -> {status, body}. Caller has already checked origin, rate limit and the access code. */
-export async function fileRequest(env, code, body) {
+/**
+ * -> {status, body}. Caller has already checked origin, rate limit and the access code.
+ * rootsOverride (TODO #51): the person's "files" from the config branch; null = OWNER_FILES / ACCESS_CODES as before.
+ */
+export async function fileRequest(env, code, body, rootsOverride) {
   const maxBytes = parseInt(env.FILE_MAX_BYTES || "30720", 10);
   if (!env.FILE_READ_TOKEN) return { status: 200, body: { error: "file_disabled" } };
-  const roots = fileRoots(env, code);
+  const roots = Array.isArray(rootsOverride) ? rootsOverride.map(normRoot).filter(Boolean) : fileRoots(env, code);
   const op = body && body.op;
   if (op === "roots") return { status: 200, body: { roots, maxBytes } };
   if (op !== "get") return { status: 400, body: { error: "bad_op" } };

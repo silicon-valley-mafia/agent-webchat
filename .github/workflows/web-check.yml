@@ -1,0 +1,63 @@
+name: Web page - syntax check
+
+# The Worker workflow only runs for worker/**, web/files.js and web/ui.js, so changes to web/app.js
+# had no automated check at all. This job only parses the page scripts (no deploy, no secrets).
+on:
+  push:
+    branches: [main]
+    paths: ["web/**", ".github/workflows/web-check.yml"]
+  pull_request:
+    paths: ["web/**", ".github/workflows/web-check.yml"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: node --check web/*.js (and preview folders web/*/*.js)
+        run: |
+          set -e
+          shopt -s nullglob
+          for f in web/*.js web/*/*.js; do
+            echo "checking $f"
+            node --check "$f"
+          done
+      - name: config.js must not contain secrets
+        run: |
+          if grep -nEi '(secret|token|password)[^,]*[:=][[:space:]]*"[A-Za-z0-9._-]{20,}"' web/config.js; then
+            echo "web/config.js looks like it contains a secret - the repo is public" >&2
+            exit 1
+          fi
+          echo "no secret-looking values in web/config.js"
+      # TODO #31 (GitHub Pages bandwidth precaution): only web/ is published to Pages, and every
+      # visitor downloads it. Today it is ~100 KB raw (~30 KB gzipped). Fail early if large files
+      # (screenshots, videos, a self-hosted webchat.js bundle) are committed into web/.
+      - name: web/ size guard (Pages bandwidth)
+        env:
+          MAX_FILE: "524288"
+          MAX_TOTAL: "2097152"
+        run: |
+          set -e
+          total=0
+          bad=0
+          while IFS= read -r -d '' f; do
+            s=$(stat -c %s "$f")
+            total=$((total + s))
+            if [ "$s" -gt "$MAX_FILE" ]; then
+              echo "too big for the Pages site: $f ($s bytes > $MAX_FILE)" >&2
+              bad=1
+            fi
+          done < <(find web -type f -print0)
+          echo "web/ total: $total bytes (limit $MAX_TOTAL)"
+          if [ "$total" -gt "$MAX_TOTAL" ]; then
+            echo "web/ is larger than $MAX_TOTAL bytes - keep large assets off GitHub Pages (TODO #31)" >&2
+            bad=1
+          fi
+          exit $bad

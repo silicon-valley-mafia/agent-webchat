@@ -1,0 +1,141 @@
+name: Token Worker - test and deploy
+
+on:
+  push:
+    branches: [main]
+    paths: ["worker/**", ".github/workflows/worker.yml"]
+  pull_request:
+    paths: ["worker/**", "web/files.js", "web/ui.js", "web/voice.js", "web/agents.js", "web/turns.js", "web/stop.js", "web/group.js", "web/rail.js", "web/timestamps.js", "web/replies.js", "web/role.js", "web/insert.js", "web/route.js", "web/header.js", ".github/workflows/worker.yml"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: worker
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: node --test test/token.test.js test/log.test.js test/features.test.js test/artifact.test.js test/files.test.js test/ui.test.js test/pages.test.js test/voice.test.js test/agents.test.js test/turns.test.js test/stop.test.js test/group.test.js test/agentlogs.test.js test/rail.test.js test/replies.test.js test/owners.test.js test/role.test.js test/preflight.test.js test/repofile.test.js test/route.test.js test/agentuploads.test.js test/config.test.js
+
+  deploy:
+    needs: test
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    env:
+      CF_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      HAS_LOG_TOKEN: ${{ secrets.LOG_REPO_TOKEN != '' }}
+      HAS_ACCESS_CODES: ${{ secrets.ACCESS_CODES != '' }}
+      HAS_ARTIFACT_TOKEN: ${{ secrets.ARTIFACT_REPO_TOKEN != '' }}
+      HAS_AGENTS: ${{ secrets.AGENTS != '' }}
+      HAS_OWNER_PEPPER: ${{ secrets.OWNER_PEPPER != '' }}
+      HAS_FILE_TOKEN: ${{ secrets.FILE_READ_TOKEN != '' }}
+      HAS_OWNER_FILES: ${{ secrets.OWNER_FILES != '' }}
+      HAS_SYSTEM_PAT: ${{ secrets.AGENT_SYSTEM_PAT != '' }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Skip notice
+        if: env.CF_TOKEN == ''
+        run: echo "CLOUDFLARE_API_TOKEN secret not set - skipping deploy (deploy manually with wrangler, see README)."
+      - name: Deploy to Cloudflare Workers
+        if: env.CF_TOKEN != ''
+        uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          workingDirectory: worker
+          secrets: |
+            DIRECTLINE_SECRET
+            ACCESS_CODE
+        env:
+          DIRECTLINE_SECRET: ${{ secrets.DIRECTLINE_SECRET }}
+          ACCESS_CODE: ${{ secrets.ACCESS_CODE }}
+      # Optional secrets: only uploaded when the matching repo secret exists.
+      - name: Set transcript logging token
+        if: env.CF_TOKEN != '' && env.HAS_LOG_TOKEN == 'true'
+        working-directory: worker
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          LOG_REPO_TOKEN: ${{ secrets.LOG_REPO_TOKEN }}
+        run: printf '%s' "$LOG_REPO_TOKEN" | npx --yes wrangler@3 secret put LOG_REPO_TOKEN
+      - name: Set per-person access codes
+        if: env.CF_TOKEN != '' && env.HAS_ACCESS_CODES == 'true'
+        working-directory: worker
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          ACCESS_CODES: ${{ secrets.ACCESS_CODES }}
+        run: |
+          printf '%s' "$ACCESS_CODES" | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{try{const o=JSON.parse(s);if(!o||typeof o!=="object"||Array.isArray(o))throw 0;console.log("ACCESS_CODES OK: "+Object.keys(o).length+" people")}catch(e){console.error("ACCESS_CODES is not a JSON object like {\"code\":\"Name\"}");process.exit(1)}})'
+          printf '%s' "$ACCESS_CODES" | npx --yes wrangler@3 secret put ACCESS_CODES
+      - name: Set extra agents (TODO #20)
+        if: env.CF_TOKEN != '' && env.HAS_AGENTS == 'true'
+        working-directory: worker
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          AGENTS: ${{ secrets.AGENTS }}
+        run: |
+          printf '%s' "$AGENTS" | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{try{const o=JSON.parse(s);if(!o||typeof o!=="object"||Array.isArray(o))throw 0;const ids=Object.keys(o);const nums={};for(const id of ids){if(!/^[a-z0-9][a-z0-9_-]{0,31}$/.test(id))throw "bad id "+id;const v=o[id];if(!v||!(v.secret||v.secretName))throw "agent "+id+" has no secret";if(v.num!==undefined){const n=Number(v.num);if(!Number.isInteger(n)||n<1||n>999)throw "agent "+id+": num must be 1-999";if(nums[n])throw "agents "+nums[n]+" and "+id+" share log folder num "+n;nums[n]=id}else console.log("note: agent "+id+" has no num - it gets the lowest free log folder; set num so it never shifts")}console.log("AGENTS OK: "+ids.map(i=>i+(o[i].num?" (logs/"+o[i].num+"/)":"")).join(", "))}catch(e){console.error("AGENTS must be JSON like {\"coach\":{\"name\":\"VLSI Coach\",\"num\":2,\"secret\":\"...\"}}: "+(typeof e==="string"?e:"not a JSON object"));process.exit(1)}})'
+          printf '%s' "$AGENTS" | npx --yes wrangler@3 secret put AGENTS
+      - name: Set separate artifact-repo token
+        if: env.CF_TOKEN != '' && env.HAS_ARTIFACT_TOKEN == 'true'
+        working-directory: worker
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          ARTIFACT_REPO_TOKEN: ${{ secrets.ARTIFACT_REPO_TOKEN }}
+        run: printf '%s' "$ARTIFACT_REPO_TOKEN" | npx --yes wrangler@3 secret put ARTIFACT_REPO_TOKEN
+      - name: Set conversation ownership pepper (TODO #49)
+        if: env.CF_TOKEN != '' && env.HAS_OWNER_PEPPER == 'true'
+        working-directory: worker
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          OWNER_PEPPER: ${{ secrets.OWNER_PEPPER }}
+        run: |
+          if [ "${#OWNER_PEPPER}" -lt 32 ]; then echo "OWNER_PEPPER must be at least 32 characters (e.g. openssl rand -hex 32)" >&2; exit 1; fi
+          printf '%s' "$OWNER_PEPPER" | npx --yes wrangler@3 secret put OWNER_PEPPER
+      - name: Set Insert file read-only token (TODO #37a)
+        if: env.CF_TOKEN != '' && env.HAS_FILE_TOKEN == 'true'
+        working-directory: worker
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          FILE_READ_TOKEN: ${{ secrets.FILE_READ_TOKEN }}
+        run: printf '%s' "$FILE_READ_TOKEN" | npx --yes wrangler@3 secret put FILE_READ_TOKEN
+      - name: Set agent system PAT (TODO #51 config repo + 📄 File reads)
+        if: env.CF_TOKEN != '' && env.HAS_SYSTEM_PAT == 'true'
+        working-directory: worker
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          AGENT_SYSTEM_PAT: ${{ secrets.AGENT_SYSTEM_PAT }}
+        run: printf '%s' "$AGENT_SYSTEM_PAT" | npx --yes wrangler@3 secret put AGENT_SYSTEM_PAT
+      - name: Set owner's Insert file allow-list (TODO #37a)
+        if: env.CF_TOKEN != '' && env.HAS_OWNER_FILES == 'true'
+        working-directory: worker
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          OWNER_FILES: ${{ secrets.OWNER_FILES }}
+        run: |
+          printf '%s' "$OWNER_FILES" | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{try{const a=JSON.parse(s);if(!Array.isArray(a)||!a.every(x=>typeof x==="string"&&x.split("/").filter(Boolean).length>=2&&!x.includes("..")))throw 0;console.log("OWNER_FILES OK: "+a.length+" allowed folders")}catch(e){console.error("OWNER_FILES must be a JSON array like [\"owner/repo/docs/\", \"owner/other-repo/\"]");process.exit(1)}})'
+          printf '%s' "$OWNER_FILES" | npx --yes wrangler@3 secret put OWNER_FILES
+      - name: Optional features status
+        if: env.CF_TOKEN != ''
+        run: |
+          echo "Transcript logging: ${{ env.HAS_LOG_TOKEN == 'true' && 'ON' || 'off (add LOG_REPO_TOKEN)' }}"
+          echo "Attachments saved:  ${{ (env.HAS_LOG_TOKEN == 'true' || env.HAS_ARTIFACT_TOKEN == 'true') && 'ON (token must include agent-webchat-artifcats-1)' || 'off (add LOG_REPO_TOKEN)' }}"
+          echo "Per-person codes:   ${{ env.HAS_ACCESS_CODES == 'true' && 'ON' || 'off (add ACCESS_CODES)' }}"
+          echo "Extra agents:       ${{ env.HAS_AGENTS == 'true' && 'ON' || 'off (add AGENTS, see docs/AGENTS.md)' }}"
+          echo "Ownership check:    ${{ env.HAS_OWNER_PEPPER == 'true' && 'ON (needs logging)' || 'off (add OWNER_PEPPER, see docs/OWNERSHIP.md)' }}"
+          echo "Insert file:        ${{ (env.HAS_FILE_TOKEN == 'true' || env.HAS_SYSTEM_PAT == 'true') && 'ON (folders = files key in the config repo)' || 'off (add AGENT_SYSTEM_PAT, see docs/CONFIG.md)' }}"
+          echo "Config repo:        ${{ env.HAS_SYSTEM_PAT == 'true' && 'ON (agent-webchat-config @ main, config/people.json)' || 'no AGENT_SYSTEM_PAT - config repo unreadable, secrets apply (docs/CONFIG.md)' }}"

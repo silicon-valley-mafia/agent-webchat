@@ -793,7 +793,7 @@
     var s = {
       directLine: directLine, store: window.WebChat.createStore ? window.WebChat.createStore({}, storeMiddleware(holder)) : undefined,
       subs: [], code: code, conversationId: t.conversationId || null, userId: t.userId || ("dl_" + uuid()),
-      name: t.name || "", admin: !!t.admin, startedAt: Date.now(), resumed: !!resumed, logTimer: null, dirty: false,
+      name: t.name || "", admin: !!t.admin, repos: t.repos || null, startedAt: Date.now(), resumed: !!resumed, logTimer: null, dirty: false,
       replies: [], replyIndex: {}, pendingSince: 0, queued: 0, lastSent: null,
       activityMiddleware: activityMiddleware(holder)
     };
@@ -988,7 +988,7 @@
         row.className = "row";
         var label = document.createElement("span");
         label.textContent = item.time + (current && current.admin ? "  ·  " + item.person : "") +
-          "  ·  " + (item.messages || 0) + " msg" + (item.messages === 1 ? "" : "s");
+          "  ·  " + (item.messages || 0) + " msg" + (item.messages === 1 ? "" : "s") + (item.repo ? "  ·  older logs repo" : "");
         var sid = /--(.+)$/.exec(item.path);
         if (sid) label.title = "Session " + sid[1];
         row.appendChild(label);

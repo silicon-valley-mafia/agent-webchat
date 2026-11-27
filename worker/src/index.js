@@ -15,8 +15,10 @@
  *                   before 2026-11-27 17:00 IST) the folder is logs/YYYY-MM-DD/... as before.
  *                   Returns {total} = messages written so far; the client sends it back as `since`.
  *   /export      {conversationId} -> {markdown, filename}  (no write; works without logging)
- *   /history     -> {items:[{path,date,time,person,messages,agent?}]}  (admins see everyone, others only their own)
+ *   /history     -> {items:[{path,date,time,person,messages,agent?,repo?}]}  (admins see everyone, others only their own)
  *   /transcript  {path: session folder} -> {markdown}  (one GraphQL call reads every file in the folder)
+ *   TODO #52 part 2: /history, /transcript and the #49 owner check also read the older logs repos in
+ *   LOG_REPOS_OLD (comma-separated; from the config repo "repos.oldLogs"); history items found only there get {repo}.
  *   /artifact    {op:"begin", conversationId, name, size} -> {uploadId, folder, partBytes, parts, names}
  *                {op:"manifest", conversationId, uploadId, name, size, type, sha256, parts:[{bytes,sha256,ok}]}
  *                   -> creates <folder>/MANIFEST.md in ARTIFACT_REPO
@@ -35,9 +37,9 @@
  */
 
 import { handleArtifact, handleArtifactPut, artifactsEnabled } from "./artifacts.js";
-import { ownershipOn, ownerId, recordOwner, checkOwner } from "./owners.js";
+import { ownershipOn, ownerId, recordOwner, checkOwner, oldLogRepos } from "./owners.js";
 export * from "./artifacts.js";
-export { ownershipOn, ownerId, ownerPath, recordOwner, readOwner, checkOwner, _resetOwnerCache } from "./owners.js";
+export { ownershipOn, ownerId, ownerPath, recordOwner, readOwner, checkOwner, _resetOwnerCache, oldLogRepos } from "./owners.js";
 
 const buckets = new Map(); // best-effort, per-isolate rate limiter
 
@@ -380,8 +382,8 @@ export async function createOnly(env, path, content, message, budget, target) {
 }
 
 /** Read every file of one session folder with a single GraphQL request. */
-async function readSessionFolder(env, folder) {
-  const [owner, name] = String(env.LOG_REPO).split("/");
+async function readSessionFolder(env, folder, repo) {
+  const [owner, name] = String(repo || env.LOG_REPO).split("/");
   const query =
     "query($o:String!,$n:String!,$e:String!){repository(owner:$o,name:$n){object(expression:$e){" +
     "... on Tree{entries{name type object{... on Blob{text}}}}}}}";
@@ -553,36 +555,59 @@ async function handleExport(env, origin, person, body) {
 
 async function handleHistory(env, origin, person) {
   if (!env.LOG_REPO || !env.LOG_REPO_TOKEN) return json({ items: [], reason: "logging_disabled" }, 200, origin);
-  const url =
-    "https://api.github.com/repos/" + env.LOG_REPO + "/git/trees/" + encodeURIComponent(env.LOG_BRANCH || "main") + "?recursive=1";
-  const r = await fetch(url, { headers: ghHeaders(env) });
-  if (r.status === 404 || r.status === 409) return json({ items: [] }, 200, origin); // empty repo
-  if (!r.ok) return json({ error: "github_read_" + r.status }, 502, origin);
-  const tree = await r.json();
+  // TODO #52 part 2: the current logs repo first, then each older one (LOG_REPOS_OLD, read only). A session folder
+  // found in both (a chat continued after a switch) is listed once and each message file is counted once.
+  const repos = [env.LOG_REPO].concat(oldLogRepos(env));
   const sessions = new Map();
   const sortKey = new Map();
-  for (const t of tree.tree || []) {
-    if (t.type !== "blob") continue;
-    const slash = t.path.lastIndexOf("/");
-    const folder = t.path.slice(0, slash);
-    const m = parseSession(folder);
-    if (!m || !/^\d{4}-.*\.md$/.test(t.path.slice(slash + 1))) continue;
-    if (!person.admin && m.person !== person.slug) continue;
-    let s = sessions.get(folder);
-    if (!s) {
-      s = { path: folder, date: m.date, time: m.hm.slice(0, 2) + ":" + m.hm.slice(2), person: m.person, messages: 0 };
-      if (m.num) s.agent = m.num;
-      sessions.set(folder, s);
-      sortKey.set(folder, m.date + m.hm + "-" + m.person + "--" + m.conv);
+  const seen = new Set();
+  let read = false;
+  let truncated = false;
+  for (let ri = 0; ri < repos.length; ri++) {
+    const url =
+      "https://api.github.com/repos/" + repos[ri] + "/git/trees/" + encodeURIComponent(env.LOG_BRANCH || "main") + "?recursive=1";
+    let r;
+    try {
+      r = await fetch(url, { headers: ghHeaders(env) });
+    } catch (e) {
+      if (ri === 0) throw e;
+      continue;
     }
-    if (!t.path.endsWith("/0000-session.md")) s.messages++;
+    if (r.status === 404 || r.status === 409) continue; // empty repo
+    if (!r.ok) {
+      if (ri === 0) return json({ error: "github_read_" + r.status }, 502, origin);
+      continue; // an older repo the token can't read is skipped; the current one still lists
+    }
+    const tree = await r.json();
+    read = true;
+    if (tree.truncated) truncated = true;
+    for (const t of tree.tree || []) {
+      if (t.type !== "blob") continue;
+      const slash = t.path.lastIndexOf("/");
+      const folder = t.path.slice(0, slash);
+      const m = parseSession(folder);
+      if (!m || !/^\d{4}-.*\.md$/.test(t.path.slice(slash + 1))) continue;
+      if (!person.admin && m.person !== person.slug) continue;
+      let s = sessions.get(folder);
+      if (!s) {
+        s = { path: folder, date: m.date, time: m.hm.slice(0, 2) + ":" + m.hm.slice(2), person: m.person, messages: 0 };
+        if (m.num) s.agent = m.num;
+        if (ri > 0) s.repo = repos[ri]; // only in an older logs repo
+        sessions.set(folder, s);
+        sortKey.set(folder, m.date + m.hm + "-" + m.person + "--" + m.conv);
+      }
+      if (seen.has(t.path)) continue;
+      seen.add(t.path);
+      if (!t.path.endsWith("/0000-session.md")) s.messages++;
+    }
   }
+  if (!read) return json({ items: [] }, 200, origin);
   // Newest first by date/time, across the old flat folders and the per-agent ones.
   const items = [...sessions.values()].sort((a, b) => {
     const x = sortKey.get(a.path), y = sortKey.get(b.path);
     return x < y ? 1 : x > y ? -1 : a.path < b.path ? 1 : a.path > b.path ? -1 : 0;
   });
-  return json({ items: items.slice(0, 300), truncated: !!tree.truncated || items.length > 300 }, 200, origin);
+  return json({ items: items.slice(0, 300), truncated: truncated || items.length > 300 }, 200, origin);
 }
 
 async function handleTranscript(env, origin, person, body) {
@@ -590,10 +615,20 @@ async function handleTranscript(env, origin, person, body) {
   const m = typeof body.path === "string" ? parseSession(body.path) : null;
   if (!m) return json({ error: "bad_path" }, 400, origin);
   if (!person.admin && m.person !== person.slug) return json({ error: "forbidden" }, 403, origin);
-  const res = await readSessionFolder(env, body.path);
-  if (res.error === "not_found") return json({ error: "not_found" }, 404, origin);
-  if (res.error) return json({ error: res.error }, 502, origin);
-  return json({ markdown: joinSession(res.files), path: body.path, files: res.files.length }, 200, origin);
+  // TODO #52 part 2: the folder may be in the current logs repo, an older one, or both (a chat continued after a
+  // switch). Files are joined by name; the current repo wins for a name found twice. An older repo that can't be
+  // read is skipped; the current one must answer (as before).
+  const byName = new Map();
+  const repos = [env.LOG_REPO].concat(oldLogRepos(env));
+  for (let ri = 0; ri < repos.length; ri++) {
+    const res = await readSessionFolder(env, body.path, repos[ri]);
+    if (res.error && res.error !== "not_found" && ri === 0) return json({ error: res.error }, 502, origin);
+    if (res.error) continue;
+    for (const f of res.files) if (!byName.has(f.name)) byName.set(f.name, f);
+  }
+  if (!byName.size) return json({ error: "not_found" }, 404, origin);
+  const files = [...byName.values()].sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0));
+  return json({ markdown: joinSession(files), path: body.path, files: files.length }, 200, origin);
 }
 
 const ROUTES = {

@@ -37,6 +37,7 @@ window.AGENT_WEBCHAT_CONFIG = {
   liveSessions: 4,            // conversations kept connected at once in one tab (current + 3); the oldest idle one closes first
   sendRole: true,             // web/role.js - tell the agent the code's role (owner/admin/user/readOnly) at chat start; advisory (TODO #7)
   insertFile: true,           // web/insert.js - 📄 File: insert a .md/.txt from an allowed repo path into the message (TODO #37a)
+  routeToggle: true,          // web/route.js - "➡ Pass on to Coach" chip for agents with "routes" in AGENTS (TODO #37b)
 
   // Session panel (ⓘ) links - private repos, links only work for people with access
   logTimeZone: "Asia/Kolkata",

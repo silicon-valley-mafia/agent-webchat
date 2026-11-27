@@ -71,6 +71,8 @@ export function agentRegistry(env) {
       initials: String(v.initials || "").slice(0, 3),
       secret,
       num: folderNum(v.num) || (id === defId ? folderNum(env.DEFAULT_AGENT_NUM) || 1 : null),
+      // TODO #37b: agents this one can pass messages on to ("➡ Pass on to Coach" chip on the page), e.g. ["coach"]
+      routes: Array.isArray(v.routes) ? v.routes.map(String).filter((r) => AGENT_ID_RE.test(r)).slice(0, 5) : [],
     };
     if (id === defId) out.unshift(a);
     else out.push(a);
@@ -135,7 +137,11 @@ export function pickAgent(registry, allowed, rules, requested) {
   return d ? { agent: d } : { error: "agent_not_allowed", status: 403 };
 }
 
-export const publicAgent = (a) => ({ id: a.id, name: a.name, description: a.description, initials: a.initials });
+export const publicAgent = (a) => {
+  const p = { id: a.id, name: a.name, description: a.description, initials: a.initials };
+  if (a.routes && a.routes.length) p.routes = a.routes.slice(); // only agents that have routes (TODO #37b)
+  return p;
+};
 
 function originOf(request, env) {
   const origin = request.headers.get("Origin") || "";

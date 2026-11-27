@@ -23,6 +23,11 @@ Worker. Each person (access code) can be limited to some agents.
      number from 2 up and never change or reuse it.
    - The existing agent stays as id `github` (`DEFAULT_AGENT_ID` / `DEFAULT_AGENT_NAME` in `worker/wrangler.toml`),
      folder number 1.
+   - `routes` (optional, TODO #37b): agent ids this agent can pass messages on to, e.g. `"spark": { ..., "routes": ["coach"] }`.
+     A chat with that agent shows a **➡ Pass on to Coach** chip above the send box; while it is on, every message
+     carries `channelData.awRoute = "coach"` (Copilot Studio: `System.Activity.ChannelData.awRoute`) and the agent
+     decides what to do with it (SPARK forwards it to the Coach). Remembered per chat. Off: `routeToggle: false`.
+     The page itself forwards nothing; like the role (section 5) it is a hint the agent can't verify.
 3. Re-run **Actions -> Token Worker - test and deploy -> Run workflow** (or push any change under `worker/`).
    The deploy step checks the JSON and uploads it as a Worker secret.
 

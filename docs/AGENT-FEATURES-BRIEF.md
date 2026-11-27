@@ -1,15 +1,15 @@
-# Brief: webchat features for the new agents (RELAY, CONDUCTOR)
+# Brief: webchat features for the new agents (SPARK, CONDUCTOR)
 
-_Written 2026-11-27 (IST) for the GitHub agent. Read this whole file, then `docs/TODO.md`, `docs/TODO-2.md`, `docs/TODO-3.md` and `docs/AGENTS.md` before starting._
+_Written 2026-11-27 (IST) for the GitHub agent. Names decided 2026-11-27 17:03 IST: **SPARK** and **CONDUCTOR** (earlier drafts called agent 1 RELAY). Read this whole file, then `docs/TODO.md`, `docs/TODO-2.md`, `docs/TODO-3.md` and `docs/AGENTS.md` before starting._
 
 ## 1. Context
 
 Two new Copilot Studio agents are being added to the agent picker:
 
-| Agent | Model | Job |
-|---|---|---|
-| **RELAY** | Haiku | Front door. Forwards a message to the VLSI Coach and returns the reply. |
-| **CONDUCTOR** | Sonnet | GitHub work. Writes a plan file, shows it, waits for "yes", then runs tasks or delegates them. Only agent allowed to write. |
+| Agent | Webchat id | Model | Job |
+|---|---|---|---|
+| **SPARK** | `spark` | Haiku | Quick all-rounder: short answers and GitHub reads; hands deep questions to the VLSI Coach. Read-only. |
+| **CONDUCTOR** | `conductor` | Sonnet | GitHub work. Writes a plan file, shows it, waits for "yes", then runs tasks or delegates them. Only agent allowed to write. |
 
 The owner builds the agents in Copilot Studio. **Your job is the webchat side only**: the page (`web/`) and the Worker (`worker/`). Do not edit agent instructions.
 

@@ -39,7 +39,7 @@
   $("title").textContent = TITLE;
   document.title = TITLE;
   // Pages caches files for 10 min: a new app.js with an old cached index.html would miss these helper files.
-  if (!window.AgentSessions || !window.AgentMarkdown) { el.status.textContent = "This page was just updated - please reload it (Ctrl+Shift+R)."; return; }
+  if (!window.AgentSessions || !window.AgentMarkdown || !window.AgentReplies) { el.status.textContent = "This page was just updated - please reload it (Ctrl+Shift+R)."; return; }
 
   var MESSAGES = {
     bad_access_code: "Wrong access code.",
@@ -666,122 +666,10 @@
     el.notice.appendChild(nc);
   }
 
-  // ---------------- replies: copy (TODO #17) + collapse (TODO #19) ----------------
-  function rememberReply(s, a) {
-    if (s.replyIndex[a.id]) { s.replyIndex[a.id].text = a.text; s.replyIndex[a.id].key = U ? U.letterKey(a.text) : ""; return; }
-    var r = { id: a.id, text: a.text, key: U ? U.letterKey(a.text) : "", ts: a.timestamp };
-    s.replyIndex[a.id] = r;
-    s.replies.push(r);
-  }
-  function manualStates(s) { return jsonGet(sessionStorage, K.collapse + (s.conversationId || ""), {}); }
-  function setManual(s, id, state) {
-    var m = manualStates(s);
-    if (state) m[id] = state; else delete m[id];
-    try { sessionStorage.setItem(K.collapse + (s.conversationId || ""), JSON.stringify(m)); } catch (e) {}
-  }
-  function copyText(text, btn) {
-    var done = function () {
-      var old = btn.textContent;
-      btn.textContent = "Copied ✓";
-      setTimeout(function () { btn.textContent = old; }, 1500);
-    };
-    if (navigator.clipboard && navigator.clipboard.writeText) {
-      return navigator.clipboard.writeText(text).then(done, function () { legacyCopy(text) && done(); });
-    }
-    if (legacyCopy(text)) done();
-    return Promise.resolve();
-  }
-  function legacyCopy(text) {
-    var ta = document.createElement("textarea");
-    ta.value = text;
-    ta.setAttribute("readonly", "");
-    ta.style.position = "fixed"; ta.style.opacity = "0";
-    document.body.appendChild(ta);
-    ta.select();
-    var ok = false;
-    try { ok = document.execCommand("copy"); } catch (e) {}
-    ta.remove();
-    return ok;
-  }
-  function bubbleContent(b) { return b.querySelector(".webchat__bubble__content") || b; }
-  function visibleText(b) { return (bubbleContent(b).innerText || "").trim(); }
-  function replyMarkdown(s, b) {
-    var r = b.__awId && s.replyIndex[b.__awId];
-    return r ? r.text : visibleText(b);
-  }
-
-  function addTools(s, b) {
-    var bar = document.createElement("div");
-    bar.className = "aw-tools";
-    var stub = document.createElement("span");
-    stub.className = "aw-stub";
-    bar.appendChild(stub);
-    var cp = button("Copy", function () { copyText(visibleText(b), cp); }, "aw-copy");
-    cp.title = "Copy as plain text"; cp.setAttribute("aria-label", "Copy reply as plain text");
-    var md = button("Copy MD", function () { copyText(replyMarkdown(s, b), md); }, "aw-copy");
-    md.title = "Copy the original Markdown"; md.setAttribute("aria-label", "Copy reply as Markdown");
-    var tg = button("Expand", function () {
-      var st = b.__awState === "expanded" ? "collapsed" : "expanded";
-      setManual(s, b.__awId, st);
-      decorate(s);
-    }, "aw-toggle");
-    var hd = button("Hide", function () {
-      setManual(s, b.__awId, b.__awState === "hidden" ? "expanded" : "hidden");
-      decorate(s);
-    }, "aw-hide");
-    [cp, md, tg, hd].forEach(function (x) { bar.appendChild(x); });
-    b.appendChild(bar);
-    b.__awTools = { bar: bar, stub: stub, toggle: tg, hide: hd };
-  }
-
-  /** Finds bot bubbles in the transcript, adds the tool bar once, then applies the collapse plan. */
-  function decorate(s) {
-    if (!s || !s.mount || s !== current) return;
-    var bubbles = Array.prototype.slice.call(s.mount.querySelectorAll(".webchat__bubble:not(.webchat__bubble--from-user)"));
-    var used = {}, ids = [], long = {}, byId = {};
-    bubbles.forEach(function (b) { if (b.__awId && b.__awId.indexOf("dom-") !== 0) used[b.__awId] = true; });
-    bubbles.forEach(function (b) {
-      var text = visibleText(b);
-      if (!text && !b.__awTools) return;
-      if (!b.__awId || b.__awId.indexOf("dom-") === 0) {
-        var id = U ? U.matchReply(text, s.replies, used) : null;
-        if (id) used[id] = true;
-        b.__awId = id || "dom-" + (U ? U.letterKey(text, 60) : text.slice(0, 60));
-      }
-      if (!b.__awTools) addTools(s, b);
-      ids.push(b.__awId);
-      byId[b.__awId] = b;
-      var c = bubbleContent(b);
-      long[b.__awId] = c.scrollHeight > PREVIEW_PX + 40;
-    });
-    var plan = U ? U.collapsePlan(ids, KEEP_EXPANDED, manualStates(s), long) : {};
-    ids.forEach(function (id) {
-      var b = byId[id], st = plan[id] || "expanded", c = bubbleContent(b), t = b.__awTools;
-      b.__awState = st;
-      c.classList.toggle("aw-collapsed", st === "collapsed");
-      c.classList.toggle("aw-hidden", st === "hidden");
-      c.style.setProperty("--aw-preview", PREVIEW_PX + "px");
-      t.toggle.hidden = !long[id] || st === "hidden";
-      t.toggle.textContent = st === "collapsed" ? "Show more" : "Show less";
-      t.toggle.setAttribute("aria-expanded", st === "expanded" ? "true" : "false");
-      t.hide.textContent = st === "hidden" ? "Show" : "Hide";
-      var lines = (visibleText(b).match(/\n/g) || []).length + 1;
-      t.stub.textContent = st === "hidden" ? "Reply hidden · " + lines + " line" + (lines === 1 ? "" : "s") : "";
-    });
-    if (el.expandAll) el.expandAll.hidden = !ids.some(function (id) { return long[id]; });
-  }
-  function scheduleDecorate(s) {
-    clearTimeout(s.decorateTimer);
-    s.decorateTimer = setTimeout(function () { decorate(s); }, 120);
-  }
-  function setAll(s, state) {
-    var m = manualStates(s);
-    Array.prototype.forEach.call(s.mount.querySelectorAll(".webchat__bubble:not(.webchat__bubble--from-user)"), function (b) {
-      if (b.__awId) m[b.__awId] = state;
-    });
-    try { sessionStorage.setItem(K.collapse + (s.conversationId || ""), JSON.stringify(m)); } catch (e) {}
-    decorate(s);
-  }
+  // ---------------- replies: copy (TODO #17) + collapse (TODO #19): web/replies.js ----------------
+  var RP = window.AgentReplies({ U: U, K: K, el: el, jsonGet: jsonGet, PREVIEW_PX: PREVIEW_PX, KEEP_EXPANDED: KEEP_EXPANDED,
+    current: function () { return current; }, button: function (l, f, c) { return button(l, f, c); } });
+  var rememberReply = RP.rememberReply, decorate = RP.decorate, scheduleDecorate = RP.scheduleDecorate, setAll = RP.setAll, copyText = RP.copyText;
 
   // ---------------- clear chat (TODO #21) ----------------
   function clearedAt(s) { return (s && s.conversationId && jsonGet(localStorage, K.cleared, {})[s.conversationId]) || 0; }

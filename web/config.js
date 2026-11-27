@@ -29,6 +29,8 @@ window.AGENT_WEBCHAT_CONFIG = {
   debugActivities: true,      // web/turns.js - keep activity metadata (no text) for AgentTurn.summary() in DevTools
   stopButton: true,           // web/stop.js - "⏹ Stop" hides the rest of the current reply (TODO #4)
   voiceDiagnostics: true,     // web/voice.js - explain why dictation gave no text
+  groupChat: true,            // web/group.html - 🧪 Group button: one prompt to several agents (TODO #43, experimental)
+  groupMaxAgents: 4,          // most agents in one group (2-6); every prompt costs one agent turn per agent
 
   // Session panel (ⓘ) links - private repos, links only work for people with access
   logTimeZone: "Asia/Kolkata",

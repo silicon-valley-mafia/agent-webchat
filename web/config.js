@@ -38,6 +38,7 @@ window.AGENT_WEBCHAT_CONFIG = {
   sendRole: true,             // web/role.js - tell the agent the code's role (owner/admin/user/readOnly) at chat start; advisory (TODO #7)
   insertFile: true,           // web/insert.js - 📄 File: insert a .md/.txt from an allowed repo path into the message (TODO #37a)
   routeToggle: true,          // web/route.js - "➡ Pass on to Coach" chip for agents with "routes" in AGENTS (TODO #37b)
+  routeMarker: "both",        // "both" = visible "[route: coach]" first line + channelData (the agent's AI only sees text); "channelData" = old way
   sessionHeader: true,        // web/header.js - your session header from the private config branch on message 1, then every N (TODO #51)
   copyPrompt: true,           // web/copyprompt.js - Copy / Reuse under the messages you send (TODO #50)
   starterPrompts: true,       // web/starters.js - prompt chips on an empty chat, for agents with "starters" (TODO #45)

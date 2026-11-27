@@ -217,6 +217,26 @@ async function handleFile(request, env) {
   return json(r.body, r.status, origin);
 }
 
+/**
+ * TODO #20: uploads (/artifact, /artifact/put) go to webchat-uploads/<agent number>/... when the page names the agent
+ * (X-Agent, same rules as /token). No header (older page) = the old flat folder, exactly as before. The request body
+ * (up to ~100 MB) is passed through untouched.
+ */
+const ART_ROUTES = new Set(["/artifact", "/artifact/put"]);
+async function artifactRoute(request, env, env0, ctx, registry) {
+  const requested = (request.headers.get("X-Agent") || "").trim();
+  const origin = originOf(request, env);
+  if (!requested || !origin || request.method !== "POST" || !registry.length) return worker.fetch(request, env0, ctx);
+  const code = request.headers.get("X-Access-Code") || "";
+  const person = await identify(env, code);
+  if (!person) return worker.fetch(request, env0, ctx); // index.js answers 401 (and rate-limits)
+  const rules = personRules(env, code, person);
+  const pick = pickAgent(registry, allowedAgents(registry, rules), rules, requested);
+  if (pick.error) return json({ error: pick.error }, pick.status, origin);
+  const a = pick.agent;
+  return worker.fetch(request, { ...env0, LOG_AGENT_NUM: String(a.num), LOG_AGENT_ID: a.id, LOG_AGENT_NAME: a.name }, ctx);
+}
+
 export default {
   async fetch(request, env, ctx) {
     const url = new URL(request.url);
@@ -235,6 +255,7 @@ export default {
       j.agents = registry.length;
       return new Response(JSON.stringify(j), { status: res.status, headers: res.headers });
     }
+    if (ART_ROUTES.has(url.pathname)) return artifactRoute(request, env, env0, ctx, registry);
     if (!DL_ROUTES.has(url.pathname)) return worker.fetch(request, env0, ctx);
 
     // Origin / method / config / bad-code errors: let index.js answer exactly as before (rate limits included).

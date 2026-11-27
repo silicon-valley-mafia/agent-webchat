@@ -2,7 +2,7 @@
  * Attached files -> artifact repo (ARTIFACT_REPO, default branch), create-only.
  * Split out of index.js; shares its helpers (imported below, used only at call time).
  */
-import { json, createOnly, contentsUrl, ghHeaders, localParts, CONV_RE } from "./index.js";
+import { json, createOnly, contentsUrl, ghHeaders, localParts, CONV_RE, agentNum } from "./index.js";
 
 // ---------- attached files -> artifact repo ----------
 // The browser base64-encodes each part and sends the complete GitHub "create file" JSON body.
@@ -70,11 +70,15 @@ export function uploadIdOk(env, id, now = Date.now()) {
   return Number.isFinite(t) && Math.abs(now - t) <= 2 * 86400000;
 }
 
-/** webchat-uploads/<day>/<person>--<conversation>/<HHMMSS>-<rand> (person comes from the access code). */
-export function artifactFolder(person, conversationId, uploadId) {
+/**
+ * webchat-uploads/[<agent number>/]<day>/<person>--<conversation>/<HHMMSS>-<rand> (person comes from the access code).
+ * The agent number (TODO #20 / #44, same numbers as logs/<N>/) is set when the page names the agent (X-Agent);
+ * without it the folder is the old flat one.
+ */
+export function artifactFolder(person, conversationId, uploadId, num) {
   const m = UPLOAD_ID_RE.exec(uploadId);
   const safe = conversationId.replace(/[^A-Za-z0-9_-]/g, "_").slice(0, 80);
-  return "webchat-uploads/" + m[1] + "-" + m[2] + "-" + m[3] + "/" + person.slug + "--" + safe + "/" + m[4] + "-" + m[5];
+  return "webchat-uploads/" + (num ? num + "/" : "") + m[1] + "-" + m[2] + "-" + m[3] + "/" + person.slug + "--" + safe + "/" + m[4] + "-" + m[5];
 }
 
 function fmtBytes(n) {
@@ -131,7 +135,7 @@ export async function handleArtifact(env, origin, person, body) {
   if (body.op === "begin") {
     if (size > maxArtifactBytes(env) || n > MAX_PARTS) return json({ error: "too_large", max: maxArtifactBytes(env) }, 413, origin);
     const uploadId = newUploadId(env);
-    const folder = artifactFolder(person, id, uploadId);
+    const folder = artifactFolder(person, id, uploadId, agentNum(env));
     const names = Array.from({ length: n }, (_, i) => partName(name, i + 1, n));
     return json({ enabled: true, repo: artifactRepo(env), uploadId, folder, partBytes: pb, parts: n, names, maxBody: MAX_BODY }, 200, origin);
   }
@@ -146,7 +150,7 @@ export async function handleArtifact(env, origin, person, body) {
       sha256: p && HEX64.test(p.sha256) ? p.sha256 : "",
       ok: !!(p && p.ok),
     }));
-    const folder = artifactFolder(person, id, body.uploadId);
+    const folder = artifactFolder(person, id, body.uploadId, agentNum(env));
     const text = manifestText(person, id, body.uploadId, folder, {
       name: String(body.name || name).slice(0, 200),
       safeName: name,
@@ -180,7 +184,7 @@ export async function handleArtifactPut(request, env, origin, person, url) {
   if (len > MAX_BODY) return json({ error: "too_large", max: MAX_BODY }, 413, origin);
   if (!request.body) return json({ error: "empty_body" }, 400, origin);
 
-  const path = artifactFolder(person, id, uploadId) + "/" + partName(safeFileName(q.get("name")), i, n);
+  const path = artifactFolder(person, id, uploadId, agentNum(env)) + "/" + partName(safeFileName(q.get("name")), i, n);
   let body = request.body;
   if (typeof FixedLengthStream === "function") {
     // keeps Content-Length on the way out; piping is native, so no Worker CPU per byte

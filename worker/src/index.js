@@ -27,14 +27,17 @@
  * Secrets: DIRECTLINE_SECRET; ACCESS_CODE (owner, admin) and/or ACCESS_CODES (JSON:
  *   {"code": "Name"} or {"code": {"name": "Name", "admin": true}}); LOG_REPO_TOKEN (optional);
  *   ARTIFACT_REPO_TOKEN (optional, defaults to LOG_REPO_TOKEN). Vars: ARTIFACT_REPO, ARTIFACT_PART_BYTES,
- *   ARTIFACT_MAX_BYTES.
+ *   ARTIFACT_MAX_BYTES. OWNER_PEPPER (optional): turns on the conversation ownership check (TODO #49, owners.js):
+ *   /token records owners/<conversation>.json, /resume /export /log answer 403 for another code's conversation.
  * Vars: ALLOWED_ORIGINS, DIRECTLINE_DOMAIN, RATE_LIMIT_PER_MIN (token/resume, 10),
  *   API_RATE_LIMIT_PER_MIN (log/export/history/transcript, 60), LOG_REPO, LOG_BRANCH (main),
  *   LOG_TZ_OFFSET_MIN (330 = IST), OWNER_NAME (name for ACCESS_CODE, default "Owner").
  */
 
 import { handleArtifact, handleArtifactPut, artifactsEnabled } from "./artifacts.js";
+import { ownershipOn, ownerId, recordOwner, checkOwner } from "./owners.js";
 export * from "./artifacts.js";
+export { ownershipOn, ownerId, ownerPath, recordOwner, readOwner, checkOwner, _resetOwnerCache } from "./owners.js";
 
 const buckets = new Map(); // best-effort, per-isolate rate limiter
 
@@ -435,24 +438,28 @@ async function handleToken(env, origin, person) {
   }
   if (!dl.ok) return json({ error: "directline_error", status: dl.status }, 502, origin);
   const data = await dl.json();
-  return json(
-    {
-      token: data.token,
-      expires_in: data.expires_in,
-      conversationId: data.conversationId,
-      userId,
-      domain: domain + "/v3/directline",
-      name: person.name,
-      admin: person.admin,
-    },
-    200,
-    origin
-  );
+  const out = {
+    token: data.token,
+    expires_in: data.expires_in,
+    conversationId: data.conversationId,
+    userId,
+    domain: domain + "/v3/directline",
+    name: person.name,
+    admin: person.admin,
+  };
+  // TODO #49: remember who started it. A failed write doesn't block the chat (only later /resume by a non-admin).
+  if (ownershipOn(env) && person.owner) {
+    const rec = await recordOwner(env, data.conversationId, person.owner, env.LOG_AGENT_ID || "");
+    out.ownerRecorded = !!rec.recorded;
+  }
+  return json(out, 200, origin);
 }
 
 async function handleResume(env, origin, person, body) {
   const id = body.conversationId;
   if (typeof id !== "string" || !CONV_RE.test(id)) return json({ error: "bad_conversation_id" }, 400, origin);
+  const deny = await checkOwner(env, id, person);
+  if (deny) return json({ error: deny.error }, deny.status, origin);
   const domain = dlDomain(env);
   let r;
   try {
@@ -480,9 +487,11 @@ async function handleResume(env, origin, person, body) {
   );
 }
 
-async function loadConversation(env, origin, body) {
+async function loadConversation(env, origin, body, person) {
   const id = body.conversationId;
   if (typeof id !== "string" || !CONV_RE.test(id)) return { res: json({ error: "bad_conversation_id" }, 400, origin) };
+  const deny = await checkOwner(env, id, person);
+  if (deny) return { res: json({ error: deny.error }, deny.status, origin) };
   try {
     const meta = {};
     const acts = await fetchActivities(env, id, meta);
@@ -494,7 +503,7 @@ async function loadConversation(env, origin, body) {
 
 async function handleLog(env, origin, person, body) {
   if (!env.LOG_REPO || !env.LOG_REPO_TOKEN) return json({ logged: false, reason: "logging_disabled" }, 200, origin);
-  const c = await loadConversation(env, origin, body);
+  const c = await loadConversation(env, origin, body, person);
   if (c.res) return c.res;
   const msgs = c.acts.filter((a) => a.type === "message");
   if (!msgs.length) return json({ logged: false, reason: "empty" }, 200, origin);
@@ -534,7 +543,7 @@ async function handleLog(env, origin, person, body) {
 }
 
 async function handleExport(env, origin, person, body) {
-  const c = await loadConversation(env, origin, body);
+  const c = await loadConversation(env, origin, body, person);
   if (c.res) return c.res;
   const offset = parseInt(env.LOG_TZ_OFFSET_MIN || "330", 10);
   const md = renderTranscript(c.id, c.acts, offset, person);
@@ -630,7 +639,9 @@ export default {
     const limit = route.bucket === "tok" ? tokLimit : parseInt(env.API_RATE_LIMIT_PER_MIN || "60", 10);
     if (rateLimited(route.bucket + ":" + ip, limit)) return json({ error: "rate_limited" }, 429, origin);
 
-    const person = await identify(env, request.headers.get("X-Access-Code") || "");
+    const code = request.headers.get("X-Access-Code") || "";
+    let person = await identify(env, code);
+    if (person && ownershipOn(env)) person = { ...person, owner: await ownerId(env, code) };
     if (!person) {
       // wrong guesses on any endpoint also burn the token bucket (brute-force guard)
       if (route.bucket !== "tok") rateLimited("tok:" + ip, tokLimit);

@@ -134,6 +134,9 @@
     var box = doc && doc.getElementById && doc.getElementById("notice");
     if (!box) { try { console.warn(text); } catch (e) {} return; }
     var t = doc.getElementById("noticetext") || box;
+    var close = doc.getElementById("noticeclose");
+    // same rule as app.js notice(): drop action buttons left by an earlier notice ("New chat", "Undo")
+    try { Array.prototype.slice.call(box.children || []).forEach(function (c) { if (c !== t && c !== close) c.remove(); }); } catch (e) {}
     t.textContent = text;
     box.hidden = false;
     clearTimeout(noticeTimer);
@@ -183,7 +186,7 @@
   }
 
   root.AgentVoice = {
-    install: install, dictateMiddleware: dictateMiddleware,
+    install: install, dictateMiddleware: dictateMiddleware, showNotice: showNotice,
     wrapFactory: wrapFactory, wrapPonyfill: wrapPonyfill, classify: classify, reason: reason, note: note,
     trace: function () { return events.slice(); },
     report: function () {

@@ -131,6 +131,10 @@ const USER_RE = /^dl_[A-Za-z0-9_-]{1,80}$/;
 export const SESSION_RE = /^logs\/(\d{4}-\d{2}-\d{2})\/(\d{4})-([a-z0-9-]{1,24})--([A-Za-z0-9_-]{1,80})$/;
 /** Cloudflare Workers Free allows 50 subrequests per request; keep headroom for Direct Line reads. */
 export const WRITE_BUDGET = 40;
+/** Direct Line pages read per request (one subrequest each). Was 5; long conversations could stop being logged. */
+export const DL_MAX_PAGES = 10;
+/** Subrequests one /log call may use in total (Direct Line reads + GitHub writes); 2 spare below the 50 limit. */
+export const SUBREQUEST_BUDGET = 48;
 
 // ---------- transcript helpers ----------
 
@@ -251,15 +255,22 @@ export function messageFile(a, index, offsetMin, person) {
   };
 }
 
-async function fetchActivities(env, conversationId) {
+/**
+ * Reads the conversation's activities page by page (watermark), at most DL_MAX_PAGES requests.
+ * `meta` (optional) receives {pages, complete}: complete = false when the page limit was hit before the end.
+ */
+async function fetchActivities(env, conversationId, meta) {
   const base = dlDomain(env) + "/v3/directline/conversations/" + encodeURIComponent(conversationId) + "/activities";
   const seen = new Set();
   const all = [];
   let wm = null;
-  for (let i = 0; i < 5; i++) {
+  let pages = 0;
+  let complete = false;
+  for (let i = 0; i < DL_MAX_PAGES; i++) {
     const r = await fetch(base + (wm ? "?watermark=" + encodeURIComponent(wm) : ""), {
       headers: { Authorization: "Bearer " + env.DIRECTLINE_SECRET },
     });
+    pages++;
     if (!r.ok) {
       const e = new Error("directline_error");
       e.status = r.status;
@@ -272,8 +283,15 @@ async function fetchActivities(env, conversationId) {
       if (a.id) seen.add(a.id);
       all.push(a);
     }
-    if (!j.watermark || j.watermark === wm || acts.length === 0) break;
+    if (!j.watermark || j.watermark === wm || acts.length === 0) {
+      complete = true;
+      break;
+    }
     wm = j.watermark;
+  }
+  if (meta) {
+    meta.pages = pages;
+    meta.complete = complete;
   }
   return all;
 }
@@ -421,7 +439,9 @@ async function loadConversation(env, origin, body) {
   const id = body.conversationId;
   if (typeof id !== "string" || !CONV_RE.test(id)) return { res: json({ error: "bad_conversation_id" }, 400, origin) };
   try {
-    return { id, acts: await fetchActivities(env, id) };
+    const meta = {};
+    const acts = await fetchActivities(env, id, meta);
+    return { id, acts, meta };
   } catch (e) {
     return { res: json({ error: "directline_error", status: e.status || 0 }, 502, origin) };
   }
@@ -440,7 +460,8 @@ async function handleLog(env, origin, person, body) {
   const userId = typeof body.userId === "string" && USER_RE.test(body.userId)
     ? body.userId
     : (firstUser && firstUser.from && firstUser.from.id) || "";
-  const budget = { left: WRITE_BUDGET };
+  // Direct Line reads already used part of the 50-subrequest allowance: writes get what is left.
+  const budget = { left: Math.max(1, Math.min(WRITE_BUDGET, SUBREQUEST_BUDGET - ((c.meta && c.meta.pages) || 0))) };
   const label = "log(" + person.slug + "): " + folder.slice(5);
   let written = 0;
   let done = since;
@@ -458,7 +479,9 @@ async function handleLog(env, origin, person, body) {
     if (r.created) written++;
     done = i + 1;
   }
-  return json({ logged: true, folder, written, total: done, more: done < msgs.length }, 200, origin);
+  const out = { logged: true, folder, written, total: done, more: done < msgs.length };
+  if (c.meta && c.meta.complete === false) out.partial = true; // hit DL_MAX_PAGES: newest messages may be missing
+  return json(out, 200, origin);
 }
 
 async function handleExport(env, origin, person, body) {

@@ -78,6 +78,8 @@
   /** Banner under the header. Always dismissible (✕); opts.autoHideMs hides it after a while. */
   function notice(text, opts) {
     clearTimeout(noticeTimer);
+    // drop action buttons added by an earlier notice (MCS hint "New chat", Clear "Undo") so they don't pile up
+    Array.prototype.slice.call(el.notice.children).forEach(function (c) { if (c !== el.noticeText && c !== el.noticeClose) c.remove(); });
     (el.noticeText || el.notice).textContent = text || "";
     el.notice.hidden = !text;
     if (text && opts && opts.autoHideMs) noticeTimer = setTimeout(function () { notice(""); }, opts.autoHideMs);

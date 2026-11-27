@@ -25,10 +25,13 @@
  *   /token and /resume add {repos}; GET /health adds {config: "off"|"on"|"stale"|"error"}.
  *   #52 part 2: "repos.oldLogs" = older logs repos that History, transcripts and the #49 owner check also read;
  *   GET /health?repos=1 adds {repos: {logs, artifacts, oldLogs: [...]}} = can the tokens read them (true/false only).
+ * 💾 Save (TODO #57, src/save.js): POST /save {conversationId} writes the ⬇ Download Markdown to the logs repo as
+ *   saved/<Download file name>; every later click overwrites it with the whole conversation so far.
  */
-import worker, { identify, rateLimited, json, people, slugify, oldLogRepos, createOnly, localParts } from "./index.js";
+import worker, { identify, rateLimited, json, people, slugify, oldLogRepos, createOnly, localParts, CONV_RE } from "./index.js";
 import { fileRequest } from "./repofile.js";
 import { loadConfig, configEntry, personHeader, SECRET_NAME_RE } from "./config.js";
+import { saveEnabled, saveExport } from "./save.js";
 
 export const AGENT_ID_RE = /^[a-z0-9][a-z0-9_-]{0,31}$/;
 const DL_ROUTES = new Set(["/token", "/resume", "/log", "/export"]);
@@ -259,7 +262,7 @@ function withAgentHeader(res) {
 }
 
 /** Paths handled here, not by index.js (they need their own CORS preflight). */
-export const OWN_ROUTES = new Set(["/agents", "/file"]);
+export const OWN_ROUTES = new Set(["/agents", "/file", "/save"]);
 
 function preflight(request, env) {
   const origin = originOf(request, env);
@@ -361,6 +364,48 @@ async function handleFile(request, env, ctx) {
 }
 
 /**
+ * TODO #57: POST /save {conversationId} -> src/save.js. Same checks as /export (origin, rate limit, access code, config,
+ * X-Agent allow-list); the transcript itself comes from index.js /export, so the #49 ownership check applies too.
+ * "readOnly" codes may not save (it writes to the repo). -> {saved, status, path, repo, branch, url, commit, messages}
+ */
+async function handleSave(request, env, ctx, registry) {
+  const origin = originOf(request, env);
+  if (!origin) return json({ error: "origin_not_allowed" }, 403, null);
+  if (request.method !== "POST") return json({ error: "method_not_allowed" }, 405, origin);
+  if (!registry.length) return json({ error: "server_not_configured" }, 500, origin);
+  const ip = request.headers.get("CF-Connecting-IP") || "unknown";
+  if (rateLimited("api:" + ip, parseInt(env.API_RATE_LIMIT_PER_MIN || "60", 10))) return json({ error: "rate_limited" }, 429, origin);
+  const code = request.headers.get("X-Access-Code") || "";
+  const person = await identify(env, code);
+  if (!person) {
+    rateLimited("tok:" + ip, parseInt(env.RATE_LIMIT_PER_MIN || "10", 10));
+    return json({ error: "bad_access_code" }, 401, origin);
+  }
+  if (!saveEnabled(env)) return json({ saved: false, error: "save_disabled" }, 400, origin);
+  const cf = await configFor(env, person, origin);
+  if (cf.deny) return cf.deny;
+  if (personRole(env, code, person, cf.cfg) === "readOnly") return json({ saved: false, error: "read_only" }, 403, origin);
+  const rules = personRules(env, code, person, cf.cfg);
+  const pick = pickAgent(registry, allowedAgents(registry, rules), rules, (request.headers.get("X-Agent") || "").trim());
+  if (pick.error) return json({ error: pick.error }, pick.status, origin);
+  let body = {};
+  try { body = (await request.json()) || {}; } catch (e) { body = {}; }
+  const id = body.conversationId;
+  if (typeof id !== "string" || !CONV_RE.test(id)) return json({ error: "bad_conversation_id" }, 400, origin);
+  const a = pick.agent;
+  const agentEnv = { ...env, DIRECTLINE_SECRET: a.secret, LOG_AGENT_NUM: String(a.num), LOG_AGENT_ID: a.id, LOG_AGENT_NAME: a.name };
+  const headers = new Headers(request.headers);
+  headers.set("Content-Type", "application/json");
+  const exportReq = new Request(new URL("/export", request.url).toString(), { method: "POST", headers, body: JSON.stringify({ conversationId: id }) });
+  const exp = await worker.fetch(exportReq, agentEnv, ctx);
+  if (!exp.ok) return exp; // 403 not_owner, 502 directline_error, ... exactly as ⬇ Download would answer
+  const j = await exp.json().catch(() => null);
+  const r = await saveExport(env, j, person);
+  if (r.error) return json({ saved: false, error: r.error }, r.status || 502, origin);
+  return json(r, 200, origin);
+}
+
+/**
  * TODO #20: uploads (/artifact, /artifact/put) go to webchat-uploads/<agent number>/... when the page names the agent
  * (X-Agent, same rules as /token). No header (older page) = the old flat folder, exactly as before. The request body
  * (up to ~100 MB) is passed through untouched.
@@ -428,6 +473,7 @@ export default {
     if (request.method === "OPTIONS") return withAgentHeader(await worker.fetch(request, env0, ctx));
     if (url.pathname === "/agents") return handleAgents(request, env, registry);
     if (url.pathname === "/file") return handleFile(request, env, ctx);
+    if (url.pathname === "/save") return handleSave(request, env, ctx, registry); // TODO #57
     if (url.pathname === "/health") {
       const res = await worker.fetch(request, env0, ctx);
       const j = await res.json().catch(() => ({}));

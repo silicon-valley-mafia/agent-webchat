@@ -21,6 +21,8 @@ window.AGENT_WEBCHAT_CONFIG = {
   multilineInput: true,       // Enter sends, Shift+Enter adds a new line
   expandedRecentReplies: 3,   // the latest N agent replies are shown in full; older long ones are collapsed
   escapeAngleBrackets: true,  // show "<id>"-style text in replies instead of letting it vanish
+  exactTimeOnHover: true,     // web/timestamps.js - hover "5 minutes ago" to see the exact date and time (TODO #36)
+  timestampMode: "relative",  // "relative" ("5 minutes ago", exact time on hover) or "absolute" (exact time always shown)
 
   // Agent turns, multiple agents, Stop (each feature lives in its own file; false = old behaviour)
   multiAgent: true,           // web/agents.js - agent picker when the Worker offers 2+ agents (docs/AGENTS.md)
@@ -31,6 +33,8 @@ window.AGENT_WEBCHAT_CONFIG = {
   voiceDiagnostics: true,     // web/voice.js - explain why dictation gave no text
   groupChat: true,            // web/group.html - 🧪 Group button: one prompt to several agents (TODO #43, experimental)
   groupMaxAgents: 4,          // most agents in one group (2-6); every prompt costs one agent turn per agent
+  sessionRail: true,          // web/rail.js - ☰ Chats sidebar: several conversations (any agent) stay open, switch instantly (TODO #23)
+  liveSessions: 4,            // conversations kept connected at once in one tab (current + 3); the oldest idle one closes first
 
   // Session panel (ⓘ) links - private repos, links only work for people with access
   logTimeZone: "Asia/Kolkata",

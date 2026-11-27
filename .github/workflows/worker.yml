@@ -5,7 +5,7 @@ on:
     branches: [main]
     paths: ["worker/**", ".github/workflows/worker.yml"]
   pull_request:
-    paths: ["worker/**", "web/files.js", "web/ui.js", "web/voice.js", "web/agents.js", "web/turns.js", "web/stop.js", "web/group.js", ".github/workflows/worker.yml"]
+    paths: ["worker/**", "web/files.js", "web/ui.js", "web/voice.js", "web/agents.js", "web/turns.js", "web/stop.js", "web/group.js", "web/rail.js", "web/timestamps.js", ".github/workflows/worker.yml"]
   workflow_dispatch:
 
 permissions:
@@ -22,7 +22,7 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 22
-      - run: node --test test/token.test.js test/log.test.js test/features.test.js test/artifact.test.js test/files.test.js test/ui.test.js test/pages.test.js test/voice.test.js test/agents.test.js test/turns.test.js test/stop.test.js test/group.test.js test/agentlogs.test.js
+      - run: node --test test/token.test.js test/log.test.js test/features.test.js test/artifact.test.js test/files.test.js test/ui.test.js test/pages.test.js test/voice.test.js test/agents.test.js test/turns.test.js test/stop.test.js test/group.test.js test/agentlogs.test.js test/rail.test.js
 
   deploy:
     needs: test

@@ -8,11 +8,14 @@
  *   /resume      {conversationId} -> fresh token for an existing conversation (Direct Line reconnect)
  *   /log         {conversationId, userId?, since?} -> Worker reads the conversation from Direct Line and
  *                   CREATES files in a per-session folder (never updates or deletes anything):
- *                     logs/YYYY-MM-DD/HHMM-<person>--<conversation>/0000-session.md
- *                     logs/YYYY-MM-DD/HHMM-<person>--<conversation>/0001-HHMMSS-user.md, 0002-...-agent.md, ...
+ *                     logs/<N>/YYYY-MM-DD/HHMM-<person>--<conversation>/0000-session.md
+ *                     logs/<N>/YYYY-MM-DD/HHMM-<person>--<conversation>/0001-HHMMSS-user.md, 0002-...-agent.md, ...
+ *                   <N> = the agent's folder number (TODO #44, set by main.js as LOG_AGENT_NUM); logs/<N>/AGENT.md
+ *                   names the agent (created once). Without a number (index.js used alone, and every log written
+ *                   before 2026-11-27 17:00 IST) the folder is logs/YYYY-MM-DD/... as before.
  *                   Returns {total} = messages written so far; the client sends it back as `since`.
  *   /export      {conversationId} -> {markdown, filename}  (no write; works without logging)
- *   /history     -> {items:[{path,date,time,person,messages}]}  (admins see everyone, others only their own)
+ *   /history     -> {items:[{path,date,time,person,messages,agent?}]}  (admins see everyone, others only their own)
  *   /transcript  {path: session folder} -> {markdown}  (one GraphQL call reads every file in the folder)
  *   /artifact    {op:"begin", conversationId, name, size} -> {uploadId, folder, partBytes, parts, names}
  *                {op:"manifest", conversationId, uploadId, name, size, type, sha256, parts:[{bytes,sha256,ok}]}
@@ -129,12 +132,29 @@ export const CONV_RE = /^[A-Za-z0-9._|:-]{4,200}$/;
 const USER_RE = /^dl_[A-Za-z0-9_-]{1,80}$/;
 /** A session folder: logs/<day>/<HHMM>-<person>--<conversation> */
 export const SESSION_RE = /^logs\/(\d{4}-\d{2}-\d{2})\/(\d{4})-([a-z0-9-]{1,24})--([A-Za-z0-9_-]{1,80})$/;
+/** A per-agent session folder (TODO #44): logs/<agent number>/<day>/<HHMM>-<person>--<conversation> */
+export const AGENT_SESSION_RE = /^logs\/(\d{1,3})\/(\d{4}-\d{2}-\d{2})\/(\d{4})-([a-z0-9-]{1,24})--([A-Za-z0-9_-]{1,80})$/;
 /** Cloudflare Workers Free allows 50 subrequests per request; keep headroom for Direct Line reads. */
 export const WRITE_BUDGET = 40;
 /** Direct Line pages read per request (one subrequest each). Was 5; long conversations could stop being logged. */
 export const DL_MAX_PAGES = 10;
 /** Subrequests one /log call may use in total (Direct Line reads + GitHub writes); 2 spare below the 50 limit. */
 export const SUBREQUEST_BUDGET = 48;
+
+/** {num (null = old flat layout), date, hm, person, conv} for either folder layout, or null. */
+export function parseSession(folder) {
+  let m = SESSION_RE.exec(folder);
+  if (m) return { num: null, date: m[1], hm: m[2], person: m[3], conv: m[4] };
+  m = AGENT_SESSION_RE.exec(folder);
+  if (m) return { num: parseInt(m[1], 10), date: m[2], hm: m[3], person: m[4], conv: m[5] };
+  return null;
+}
+
+/** Agent folder number for this request (main.js sets LOG_AGENT_NUM from the agent registry), or null. */
+export function agentNum(env) {
+  const n = Number(env.LOG_AGENT_NUM);
+  return Number.isInteger(n) && n >= 1 && n <= 999 ? n : null;
+}
 
 // ---------- transcript helpers ----------
 
@@ -212,30 +232,55 @@ export function renderTranscript(conversationId, activities, offsetMin, person) 
 }
 
 /** Name used by /export downloads: one Markdown file for the whole conversation. */
-export function logPath(conversationId, activities, offsetMin, slug) {
-  return sessionFolder(conversationId, activities, offsetMin, slug) + ".md";
+export function logPath(conversationId, activities, offsetMin, slug, num) {
+  return sessionFolder(conversationId, activities, offsetMin, slug, num) + ".md";
 }
 
-/** logs/<day>/<HHMM>-<person>--<conversation>, dated by the conversation's first activity. */
-export function sessionFolder(conversationId, activities, offsetMin, slug) {
+/** logs/[<agent number>/]<day>/<HHMM>-<person>--<conversation>, dated by the conversation's first activity. */
+export function sessionFolder(conversationId, activities, offsetMin, slug, num) {
   const p = localParts((activities[0] && activities[0].timestamp) || new Date().toISOString(), offsetMin);
   const safe = conversationId.replace(/[^A-Za-z0-9_-]/g, "_").slice(0, 80);
-  return "logs/" + p.date + "/" + p.hm + "-" + (slug || "user") + "--" + safe;
+  return "logs/" + (num ? num + "/" : "") + p.date + "/" + p.hm + "-" + (slug || "user") + "--" + safe;
 }
 
-/** 0000-session.md: written once, never changed. */
-export function sessionHeader(conversationId, activities, offsetMin, person, userId) {
+/** 0000-session.md: written once, never changed. `agent` ({num, id, name}) is optional. */
+export function sessionHeader(conversationId, activities, offsetMin, person, userId, agent) {
   const label = tzLabel(offsetMin);
   const first = localParts((activities[0] && activities[0].timestamp) || new Date().toISOString(), offsetMin);
-  return [
+  const rows = [
     "# Conversation " + first.date + " " + first.time + " " + label,
     "",
     "| | |",
     "|---|---|",
     "| Person | " + ((person && person.name) || "You") + " |",
+  ];
+  if (agent && agent.num) rows.push("| Agent | " + (agent.name || agent.id || "Agent") + (agent.id ? " (`" + agent.id + "`)" : "") + " · folder `logs/" + agent.num + "/` |");
+  rows.push(
     "| Conversation ID | `" + conversationId + "` |",
     "| User ID | `" + (userId || "") + "` |",
     "| Started | " + first.date + " " + first.time + " " + label + " |",
+    ""
+  );
+  return rows.join("\n");
+}
+
+/** logs/<N>/AGENT.md: says which agent folder N belongs to. Created once (create-only), never updated. */
+export function agentNote(agent, activities, offsetMin) {
+  const first = localParts((activities && activities[0] && activities[0].timestamp) || new Date().toISOString(), offsetMin);
+  return [
+    "# logs/" + agent.num + "/ = " + (agent.name || agent.id || "Agent"),
+    "",
+    "| | |",
+    "|---|---|",
+    "| Folder number | " + agent.num + " |",
+    "| Agent id | `" + (agent.id || "") + "` |",
+    "| Agent name | " + (agent.name || "") + " |",
+    "| First conversation logged | " + first.date + " " + first.time + " " + tzLabel(offsetMin) + " |",
+    "",
+    "Written once by the token Worker when this agent's first conversation was logged (create-only, never changed).",
+    "Folder numbers come from the Worker's agent registry (agent-webchat `docs/AGENTS.md`): the default agent is `1`,",
+    "agents in the `AGENTS` secret use their `\"num\"`. A number is never reused for a different agent.",
+    "Full list: [`logs/AGENTS.md`](../AGENTS.md). Each session's `0000-session.md` also names its agent.",
     "",
   ].join("\n");
 }
@@ -454,7 +499,9 @@ async function handleLog(env, origin, person, body) {
   const msgs = c.acts.filter((a) => a.type === "message");
   if (!msgs.length) return json({ logged: false, reason: "empty" }, 200, origin);
   const offset = parseInt(env.LOG_TZ_OFFSET_MIN || "330", 10);
-  const folder = sessionFolder(c.id, c.acts, offset, person.slug);
+  const num = agentNum(env);
+  const agent = num ? { num, id: env.LOG_AGENT_ID || "", name: env.LOG_AGENT_NAME || "" } : null;
+  const folder = sessionFolder(c.id, c.acts, offset, person.slug, num);
   const since = Number.isInteger(body.since) && body.since > 0 ? Math.min(body.since, msgs.length) : 0;
   const firstUser = msgs.find(isUser);
   const userId = typeof body.userId === "string" && USER_RE.test(body.userId)
@@ -467,9 +514,11 @@ async function handleLog(env, origin, person, body) {
   let done = since;
 
   if (since === 0) {
-    const h = await createOnly(env, folder + "/0000-session.md", sessionHeader(c.id, c.acts, offset, person, userId), label + " start", budget);
+    const h = await createOnly(env, folder + "/0000-session.md", sessionHeader(c.id, c.acts, offset, person, userId, agent), label + " start", budget);
     if (h.error) return json({ logged: false, error: h.error, folder, total: 0 }, 502, origin);
     if (h.created) written++;
+    // Name the agent folder once (422 = already there). Best effort: a failure here never blocks the transcript.
+    if (agent) await createOnly(env, "logs/" + num + "/AGENT.md", agentNote(agent, c.acts, offset), "log: logs/" + num + "/ = " + (agent.id || "agent"), budget);
   }
   for (let i = since; i < msgs.length; i++) {
     const f = messageFile(msgs[i], i + 1, offset, person);
@@ -489,7 +538,7 @@ async function handleExport(env, origin, person, body) {
   if (c.res) return c.res;
   const offset = parseInt(env.LOG_TZ_OFFSET_MIN || "330", 10);
   const md = renderTranscript(c.id, c.acts, offset, person);
-  const filename = logPath(c.id, c.acts, offset, person.slug).split("/").slice(1).join("_");
+  const filename = logPath(c.id, c.acts, offset, person.slug, agentNum(env)).split("/").slice(1).join("_");
   return json({ markdown: md, filename }, 200, origin);
 }
 
@@ -502,29 +551,36 @@ async function handleHistory(env, origin, person) {
   if (!r.ok) return json({ error: "github_read_" + r.status }, 502, origin);
   const tree = await r.json();
   const sessions = new Map();
+  const sortKey = new Map();
   for (const t of tree.tree || []) {
     if (t.type !== "blob") continue;
     const slash = t.path.lastIndexOf("/");
     const folder = t.path.slice(0, slash);
-    const m = SESSION_RE.exec(folder);
+    const m = parseSession(folder);
     if (!m || !/^\d{4}-.*\.md$/.test(t.path.slice(slash + 1))) continue;
-    if (!person.admin && m[3] !== person.slug) continue;
+    if (!person.admin && m.person !== person.slug) continue;
     let s = sessions.get(folder);
     if (!s) {
-      s = { path: folder, date: m[1], time: m[2].slice(0, 2) + ":" + m[2].slice(2), person: m[3], messages: 0 };
+      s = { path: folder, date: m.date, time: m.hm.slice(0, 2) + ":" + m.hm.slice(2), person: m.person, messages: 0 };
+      if (m.num) s.agent = m.num;
       sessions.set(folder, s);
+      sortKey.set(folder, m.date + m.hm + "-" + m.person + "--" + m.conv);
     }
     if (!t.path.endsWith("/0000-session.md")) s.messages++;
   }
-  const items = [...sessions.values()].sort((a, b) => (a.path < b.path ? 1 : a.path > b.path ? -1 : 0));
+  // Newest first by date/time, across the old flat folders and the per-agent ones.
+  const items = [...sessions.values()].sort((a, b) => {
+    const x = sortKey.get(a.path), y = sortKey.get(b.path);
+    return x < y ? 1 : x > y ? -1 : a.path < b.path ? 1 : a.path > b.path ? -1 : 0;
+  });
   return json({ items: items.slice(0, 300), truncated: !!tree.truncated || items.length > 300 }, 200, origin);
 }
 
 async function handleTranscript(env, origin, person, body) {
   if (!env.LOG_REPO || !env.LOG_REPO_TOKEN) return json({ error: "logging_disabled" }, 400, origin);
-  const m = typeof body.path === "string" ? SESSION_RE.exec(body.path) : null;
+  const m = typeof body.path === "string" ? parseSession(body.path) : null;
   if (!m) return json({ error: "bad_path" }, 400, origin);
-  if (!person.admin && m[3] !== person.slug) return json({ error: "forbidden" }, 403, origin);
+  if (!person.admin && m.person !== person.slug) return json({ error: "forbidden" }, 403, origin);
   const res = await readSessionFolder(env, body.path);
   if (res.error === "not_found") return json({ error: "not_found" }, 404, origin);
   if (res.error) return json({ error: res.error }, 502, origin);

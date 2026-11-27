@@ -80,6 +80,7 @@
       .then(function (j) {
         if (!j || !Array.isArray(j.agents) || !j.agents.length) { st.enabled = false; return null; }
         st.agents = j.agents;
+        st.nums = j.nums || {}; // TODO #20: folder number per agent (History filter)
         st.ids = j.agents.map(function (a) { return a.id; });
         st.enabled = true;
         var sel = ls(K.sel);
@@ -175,7 +176,7 @@
     });
   };
 
-  api.state = function () { return { enabled: st.enabled, agents: st.agents, current: st.current, selected: ls(K.sel) }; };
+  api.state = function () { return { enabled: st.enabled, agents: st.agents, current: st.current, selected: ls(K.sel), nums: st.nums || {} }; };
   // Warm up with the remembered code so the picker shows before the first request.
   var saved = ls("agentAccessCode");
   if (saved) load(saved);

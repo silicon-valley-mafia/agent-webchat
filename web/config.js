@@ -40,6 +40,12 @@ window.AGENT_WEBCHAT_CONFIG = {
   routeToggle: true,          // web/route.js - "➡ Pass on to Coach" chip for agents with "routes" in AGENTS (TODO #37b)
   sessionHeader: true,        // web/header.js - your session header from the private config branch on message 1, then every N (TODO #51)
   copyPrompt: true,           // web/copyprompt.js - Copy / Reuse under the messages you send (TODO #50)
+  starterPrompts: true,       // web/starters.js - prompt chips on an empty chat, for agents with "starters" (TODO #45)
+  handoffButton: true,        // web/starters.js - 📝 Hand-off button: asks the agent to write its hand-off file (TODO #47)
+  handoffText: "End of session. Write the hand-off file now.",
+  planBoard: true,            // web/planboard.js - task table + "Run next task" for YAML plans in replies (TODO #46)
+  planBoardAgents: ["conductor"], // agents with the plan board (the Worker can also mark one with "plans": true)
+  historyFilter: true,        // web/historyfilter.js - filter History by agent (TODO #20)
 
   // Session panel (ⓘ) links - private repos, links only work for people with access
   logTimeZone: "Asia/Kolkata",

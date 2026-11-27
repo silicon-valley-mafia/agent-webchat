@@ -61,8 +61,8 @@
       hint.textContent = "To check it's the agent's own id: type /debug conversationid in the chat - the agent should answer with the same id.";
       doc.appendChild(hint);
       var links = [];
-      if (D.cfg.logRepo !== "" && day) links.push(["Transcript folders for " + day, "https://github.com/" + (D.cfg.logRepo || "silicon-valley-mafia/agent-webchat-logs") + "/tree/main/logs/" + day]);
-      if (D.cfg.artifactRepo !== "" && day) links.push(["Uploads for " + day, "https://github.com/" + (D.cfg.artifactRepo || "silicon-valley-mafia/agent-webchat-artifcats-1") + "/tree/main/webchat-uploads/" + day]);
+      if (D.cfg.logRepo !== "" && day) links.push(["Transcript folders for " + day, "https://github.com/" + ((s.repos && s.repos.logs) || D.cfg.logRepo || "silicon-valley-mafia/agent-webchat-logs") + "/tree/main/logs/" + day]);
+      if (D.cfg.artifactRepo !== "" && day) links.push(["Uploads for " + day, "https://github.com/" + ((s.repos && s.repos.artifacts) || D.cfg.artifactRepo || "silicon-valley-mafia/agent-webchat-artifcats-1") + "/tree/main/webchat-uploads/" + day]);
       if (links.length) {
         var p = document.createElement("p");
         p.className = "muted";

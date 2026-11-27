@@ -23,6 +23,7 @@
  *     "spark": { "name": "SPARK", "initials": "SP", "num": 2, "routes": ["coach"], "secretName": "DL_SPARK" }
  *   },                                                  secretName = a Worker secret, or a key of the AGENT_SECRETS secret
  *   "repos": { "logs": "owner/repo", "artifacts": "owner/repo" }   #52: where NEW logs / uploads are written
+ *            + "oldLogs": ["owner/old-logs"]                  #52 part 2: older logs repos, only read (History etc.)
  * }
  * A key set here wins over the same key in ACCESS_CODES; a key left out falls back to ACCESS_CODES.
  * NOT here (they stay Worker secrets): plain access codes, the admin flag, Direct Line secrets, tokens, OWNER_PEPPER.
@@ -94,6 +95,15 @@ function normRepos(raw) {
   const out = {};
   if (!isObj(raw)) return out;
   for (const k of ["logs", "artifacts"]) if (typeof raw[k] === "string" && REPO_RE.test(raw[k].trim())) out[k] = raw[k].trim();
+  // TODO #52 part 2: older logs repos, only READ (History, transcripts, #49 owner records); at most 5
+  if (Array.isArray(raw.oldLogs)) {
+    const old = [];
+    for (const r of raw.oldLogs) {
+      const t = typeof r === "string" ? r.trim() : "";
+      if (t && REPO_RE.test(t) && old.indexOf(t) < 0 && old.length < 5) old.push(t);
+    }
+    if (old.length) out.oldLogs = old;
+  }
   return out;
 }
 

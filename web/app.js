@@ -19,38 +19,9 @@
     code: "agentAccessCode", theme: "agentTheme", notify: "agentNotify", last: "agentLastSession", logged: "agentLogged",
     width: "agentWidth", cleared: "agentCleared", collapse: "agentCollapse:", skin: "agentSkin", draft: "agentDraft:"
   };
-  /**
-   * TODO #26: skins. Each skin = CSS variables in app.css ([data-skin]) + Web Chat styleOptions overrides here
-   * ("all" first, then the light/dark part). Inspired-by layouts only - no logos or product names.
-   */
-  var SKINS = {
-    classic: { label: "Classic" },
-    focus: {
-      label: "Focus (centered, no reply bubbles)",
-      all: {
-        bubbleBackground: "transparent", bubbleBorderWidth: 0, bubbleBorderRadius: 0,
-        bubbleFromUserBorderWidth: 0, bubbleFromUserBorderRadius: 18,
-        botAvatarInitials: "", botAvatarImage: undefined, userAvatarInitials: "", userAvatarImage: undefined
-      },
-      light: { bubbleFromUserBackground: "#eef0f3", bubbleFromUserTextColor: "#111827", bubbleTextColor: "#111827" },
-      dark: { bubbleFromUserBackground: "#1f2937", bubbleFromUserTextColor: "#e5e7eb", bubbleTextColor: "#e5e7eb" }
-    },
-    contrast: {
-      label: "High contrast",
-      all: { bubbleBorderWidth: 2, bubbleFromUserBorderWidth: 2, bubbleBorderRadius: 4, bubbleFromUserBorderRadius: 4 },
-      light: {
-        accent: "#0000cc", backgroundColor: "#ffffff", bubbleBackground: "#ffffff", bubbleTextColor: "#000000", bubbleBorderColor: "#000000",
-        bubbleFromUserBackground: "#0000cc", bubbleFromUserTextColor: "#ffffff", bubbleFromUserBorderColor: "#000000",
-        subtle: "#1f2937", timestampColor: "#1f2937", sendBoxTextColor: "#000000", sendBoxBackground: "#ffffff", sendBoxBorderTop: "solid 2px #000000"
-      },
-      dark: {
-        accent: "#ffff00", backgroundColor: "#000000", bubbleBackground: "#000000", bubbleTextColor: "#ffffff", bubbleBorderColor: "#ffffff",
-        bubbleFromUserBackground: "#ffff00", bubbleFromUserTextColor: "#000000", bubbleFromUserBorderColor: "#ffffff",
-        subtle: "#e5e7eb", timestampColor: "#e5e7eb", sendBoxTextColor: "#ffffff", sendBoxBackground: "#000000", sendBoxBorderTop: "solid 2px #ffffff"
-      }
-    }
-  };
-  var SKIN_ORDER = ["classic", "focus", "contrast"];
+  // TODO #26: skins live in web/skins.js (styleOptions overrides) + app.css ([data-skin]); Classic if it failed to load.
+  var SKINS = window.AgentSkins || { classic: { label: "Classic" } };
+  var SKIN_ORDER = (window.AgentSkinOrder || ["classic"]).filter(function (k) { return SKINS[k]; });
   var RESUME_MAX_AGE_MS = 24 * 3600 * 1000;
   var LOG_DEBOUNCE_MS = 4000;
   var TITLE = cfg.title || "Agent";
@@ -861,13 +832,27 @@
   }
 
   // ---------------- session info (TODO #22) ----------------
+  /** Earliest server timestamp in the store (ignores our local aw/refresh events); 0 if none. */
+  function firstActivityTime(s) {
+    var first = 0;
+    try {
+      s.store.getState().activities.forEach(function (a) {
+        if (a && a.type === "event" && a.name === "aw/refresh") return;
+        var t = Date.parse((a && a.timestamp) || "");
+        if (t && (!first || t < first)) first = t;
+      });
+    } catch (e) {}
+    return first;
+  }
   function showSession() {
     var s = current;
     if (!s) return;
     openPanel("This session");
     el.panelBody.innerHTML = "";
     var tz = cfg.logTimeZone || "Asia/Kolkata";
-    var day = U ? U.dayIn(new Date(s.startedAt), tz) : "";
+    var first = firstActivityTime(s);
+    // P10: log/upload folders are dated by the conversation's FIRST activity, not by when this tab attached
+    var day = U ? U.dayIn(new Date(first || s.startedAt), tz) : "";
     var msgs = 0;
     try { msgs = s.store.getState().activities.filter(function (a) { return a.type === "message"; }).length; } catch (e) {}
     var rows = [
@@ -875,7 +860,8 @@
       ["User id", s.userId, true],
       ["Person", s.name ? s.name + (s.admin ? " (admin)" : "") : "-"],
       ["Agent", TITLE],
-      ["Started", new Date(s.startedAt).toLocaleString() + (s.resumed ? " (resumed in this tab)" : "")],
+      ["Started", first ? new Date(first).toLocaleString() : new Date(s.startedAt).toLocaleString()],
+      ["Opened in this tab", new Date(s.startedAt).toLocaleString() + (s.resumed ? " (resumed)" : "")],
       ["Messages on screen", String(msgs)],
       ["Cleared at", clearedAt(s) ? new Date(clearedAt(s)).toLocaleString() : "-"]
     ];
@@ -1232,7 +1218,7 @@
     localStorage.setItem(K.skin, SKIN_ORDER[(SKIN_ORDER.indexOf(skinMode()) + 1) % SKIN_ORDER.length]);
     paintSkin();
     notice("Skin: " + SKINS[skinMode()].label, { autoHideMs: 4000 });
-    applyTheme(); // re-attach so Web Chat picks up the skin's styleOptions (same conversation, draft kept)
+    applyTheme(); // re-render so Web Chat picks up the skin's styleOptions (same connection, nothing replayed)
   });
   el.notify.addEventListener("click", function () {
     if (notifyOn()) { localStorage.setItem(K.notify, "off"); paintNotify(); return; }
@@ -1243,13 +1229,18 @@
     });
   });
 
-  /** Theme applies instantly; an open chat is re-attached (same conversation, history replayed). */
+  /**
+   * Theme / skin apply instantly. P6: Web Chat 4.19's renderWebChat is ReactDOM.render on the same element, so
+   * rendering again only updates styleOptions in place - same Direct Line connection and store: no /resume call
+   * (token rate limit), no switch to polling, no history replay, draft and staged files untouched.
+   * Re-attaching through /resume is kept only as a fallback if that render throws.
+   */
   function applyTheme() {
     paintThemeButton();
-    if (current && current.conversationId) {
-      var s = current;
-      resumeConversation(s.code, s.conversationId, s.userId).catch(function () { renderChat(s); });
-    }
+    if (!current || !current.mount) return;
+    var s = current;
+    try { renderChat(s); scheduleDecorate(s); return; } catch (e) {}
+    if (s.conversationId) resumeConversation(s.code, s.conversationId, s.userId).catch(function () {});
   }
   if (window.matchMedia) {
     var mq = window.matchMedia("(prefers-color-scheme: dark)");
@@ -1334,6 +1325,7 @@
     uploads: uploads, staged: function () { return staged.slice(); }, stageFiles: stageFiles, sendStaged: sendStaged,
     stagedOnlySubmit: stagedOnlySubmit, isAgentError: isAgentError, clearMarker: clearMarker,
     skins: SKINS, skinMode: skinMode, loadDraft: loadDraft, markSent: markSent, agentMessage: agentMessage, agentTyping: agentTyping,
+    firstActivityTime: firstActivityTime, applyTheme: function () { applyTheme(); },
     decorate: function () { decorate(current); }, activityMiddleware: activityMiddleware, clearChat: clearChat
   };
 })();

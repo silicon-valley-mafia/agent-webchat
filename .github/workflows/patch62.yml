@@ -1,0 +1,24 @@
+name: one-shot patch62
+on:
+  push:
+    branches: ['fix/log-card-clicks']
+    paths: ['.github/workflows/patch62.yml']
+permissions:
+  contents: write
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: python3 .github/p62/patch62.py
+      - run: cd worker && node --test test/*.test.js
+      - run: |
+          git rm -rq .github/p62
+          git config user.name 'Deepesh J'
+          git config user.email '263164968+silicon-valley-mafia@users.noreply.github.com'
+          git add -A worker
+          git commit -m 'fix(logs): card clicks (Retry / Deny / submits) are written to transcripts instead of empty messages'
+          git push

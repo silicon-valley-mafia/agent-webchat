@@ -14,7 +14,9 @@
  *                   names the agent (created once). Without a number (index.js used alone, and every log written
  *                   before 2026-11-27 17:00 IST) the folder is logs/YYYY-MM-DD/... as before.
  *                   Returns {total} = messages written so far; the client sends it back as `since`.
- *   /export      {conversationId} -> {markdown, filename}  (no write; works without logging)
+ *   /export      {conversationId} -> {markdown, filename, folder}  (no write; works without logging)
+ *                   folder = this chat's session folder (where /log writes); 💾 Save (main.js /save, TODO #57) puts
+ *                   <folder>/<filename> there and overwrites it on every later save.
  *   /history     -> {items:[{path,date,time,person,messages,agent?,repo?}]}  (admins see everyone, others only their own)
  *   /transcript  {path: session folder} -> {markdown}  (one GraphQL call reads every file in the folder)
  *   TODO #52 part 2: /history, /transcript and the #49 owner check also read the older logs repos in
@@ -418,8 +420,10 @@ async function readSessionFolder(env, folder, repo) {
   if (j.errors && !j.data) return { error: "github_read_graphql" };
   const obj = j.data && j.data.repository && j.data.repository.object;
   if (!obj || !obj.entries) return { error: "not_found" };
+  // Only 0000-session.md and the NNNN-...md message files (same rule as /history): the 💾 Save file that sits in the
+  // same folder (TODO #57) is the whole conversation again and must not be joined in twice.
   const files = obj.entries
-    .filter((e) => e.type === "blob" && /\.md$/.test(e.name))
+    .filter((e) => e.type === "blob" && /^\d{4}-.*\.md$/.test(e.name))
     .map((e) => ({ name: e.name, text: (e.object && e.object.text) || "" }))
     .sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0));
   return { files };
@@ -571,7 +575,8 @@ async function handleExport(env, origin, person, body) {
   const offset = parseInt(env.LOG_TZ_OFFSET_MIN || "330", 10);
   const md = renderTranscript(c.id, c.acts, offset, person);
   const filename = logPath(c.id, c.acts, offset, person.slug, agentNum(env)).split("/").slice(1).join("_");
-  return json({ markdown: md, filename }, 200, origin);
+  const folder = sessionFolder(c.id, c.acts, offset, person.slug, agentNum(env));
+  return json({ markdown: md, filename, folder }, 200, origin);
 }
 
 async function handleHistory(env, origin, person) {

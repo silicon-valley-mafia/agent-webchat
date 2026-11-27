@@ -28,6 +28,7 @@
         <button id="clearchat" type="button" hidden title="Clear the screen only - same session, the agent still remembers it">Clear</button>
         <button id="sessionbtn" type="button" hidden title="Show this session's id" aria-label="Session info">ⓘ Session</button>
         <button id="download" type="button" hidden title="Download this conversation as Markdown">⬇ Download</button>
+        <button id="groupbtn" type="button" title="Experimental: one prompt to several agents (opens the group page)" onclick="location.href='group.html'">🧪 Group</button>
         <button id="widthbtn" type="button" title="Width" aria-label="Toggle wide / narrow layout">↔</button>
         <button id="skinbtn" type="button" title="Skin" aria-label="Change skin">🎨</button>
         <button id="theme" type="button" title="Theme">🌓</button>
@@ -54,6 +55,7 @@
       <div id="historybody"></div>
     </section>
   </div>
+  <script>(window.AGENT_WEBCHAT_CONFIG || {}).groupChat === false && (document.getElementById("groupbtn").hidden = true);</script>
   <script src="files.js"></script>
   <script src="ui.js"></script>
   <script src="skins.js"></script>

@@ -201,6 +201,25 @@ function describeAttachment(att) {
   return "📎 **" + (att.name || "file") + "** (" + ct + ")" + url;
 }
 
+/**
+ * A card button click (Adaptive Card Action.Submit) arrives as a user message with no text and a "value" object.
+ * Copilot Studio's "Connection Required" card sends {decision: "retry" | "deny", ...}. Without this the transcript
+ * showed an empty message. -> "(clicked: Retry)", "(card submitted: {...})" (max 500 chars) or "".
+ */
+export function clickLabel(a) {
+  const v = a && a.value;
+  if (!v || typeof v !== "object") return "";
+  if (typeof v.decision === "string" && v.decision) return "(clicked: " + v.decision.charAt(0).toUpperCase() + v.decision.slice(1) + ")";
+  let j = "";
+  try {
+    j = JSON.stringify(v);
+  } catch (e) {
+    j = "";
+  }
+  if (!j || j === "{}") return "(card submitted)";
+  return "(card submitted: " + (j.length > 500 ? j.slice(0, 500) + "..." : j) + ")";
+}
+
 export function renderTranscript(conversationId, activities, offsetMin, person) {
   const msgs = activities.filter((a) => a.type === "message");
   const label = tzLabel(offsetMin);
@@ -229,6 +248,7 @@ export function renderTranscript(conversationId, activities, offsetMin, person) 
     const p = localParts(a.timestamp || a.localTimestamp, offsetMin);
     out.push("### " + (isUser(a) ? "🧑 " + who : "🤖 " + ((a.from && a.from.name) || "Agent")) + " · " + p.time, "");
     if (a.text) out.push(a.text, "");
+    else if (clickLabel(a)) out.push(clickLabel(a), "");
     for (const att of a.attachments || []) out.push(describeAttachment(att), "");
     const sa = a.suggestedActions && a.suggestedActions.actions;
     if (sa && sa.length) out.push("> Suggested: " + sa.map((x) => x.title || x.value).join(" · "), "");
@@ -296,6 +316,7 @@ export function messageFile(a, index, offsetMin, person) {
   const user = isUser(a);
   const out = ["### " + (user ? "🧑 " + ((person && person.name) || "You") : "🤖 " + ((a.from && a.from.name) || "Agent")) + " · " + p.time, ""];
   if (a.text) out.push(a.text, "");
+  else if (clickLabel(a)) out.push(clickLabel(a), "");
   for (const att of a.attachments || []) out.push(describeAttachment(att), "");
   const sa = a.suggestedActions && a.suggestedActions.actions;
   if (sa && sa.length) out.push("> Suggested: " + sa.map((x) => x.title || x.value).join(" · "), "");

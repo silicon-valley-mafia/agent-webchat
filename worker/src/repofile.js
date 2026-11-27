@@ -13,12 +13,22 @@
  *   decision 2026-11-28; this code only ever sends GET with it, inside the allow-list). Without either the route
  *   answers {error: "file_disabled"}. LOG_REPO_TOKEN is never used here.
  * Limits: text files only, FILE_MAX_BYTES (default 30720 = 30 KB), no "..", no ".github/", 1 GitHub request per call.
+ * Hardening (2026-11-28, the read token may cover many repos, so the Worker itself must hold the line):
+ *   - default branch only: "ref" is refused (an old commit or another branch could still hold something deleted later);
+ *   - a symlink is refused: GitHub answers a symlink with its TARGET, which may lie outside the allowed folder;
+ *   - secret-looking names (secret(s), credential(s), password(s), passwd, api key(s), private key(s), .env) are
+ *     never served or listed, even inside an allowed folder. Off: FILE_SENSITIVE_CHECK = "off";
+ *   - main.js adds its own per-IP limit (FILE_RATE_PER_MIN, 30) and an audit record per read (fileAudit).
  */
 
 export const FILE_EXT_RE = /\.(md|markdown|txt)$/i;
 const REPO_RE = /^[A-Za-z0-9_.-]{1,100}\/[A-Za-z0-9_.-]{1,100}$/;
 const PATH_RE = /^[A-Za-z0-9_.\/ ()+@,-]{0,400}$/;
-const REF_RE = /^[A-Za-z0-9._\/-]{1,100}$/;
+/** Names that look like they hold a secret: never served or listed (hardening 2026-11-28). */
+export const SENSITIVE_RE = /(^|[\/._ -])(secrets?|credentials?|passwords?|passwd|api[-_]?keys?|private[-_]?keys?|\.env)([\/._ -]|$)/i;
+export function sensitive(env, path) {
+  return String((env && env.FILE_SENSITIVE_CHECK) || "").toLowerCase() !== "off" && SENSITIVE_RE.test(String(path || ""));
+}
 
 function parseJson(s, want) {
   try {
@@ -94,13 +104,13 @@ export async function fileRequest(env, code, body, rootsOverride) {
   const path = String(body.path || "").replace(/\/+$/, "");
   const bad = badPath(repo, path);
   if (bad) return { status: 400, body: { error: bad } };
-  const ref = body.ref ? String(body.ref) : "";
-  if (ref && !REF_RE.test(ref)) return { status: 400, body: { error: "bad_ref" } };
+  // Default branch only: an old commit or another branch could still hold something removed from it later.
+  if (body.ref) return { status: 400, body: { error: "bad_ref", hint: "default branch only" } };
+  if (sensitive(env, path)) return { status: 403, body: { error: "sensitive_name" } };
   // A directory may be listed if it is inside a root or leads to one; a file must be inside a root.
   if (!allowed(roots, repo, path, true)) return { status: 403, body: { error: "path_not_allowed" } };
 
-  const url = "https://api.github.com/repos/" + repo + "/contents/" + path.split("/").filter(Boolean).map(encodeURIComponent).join("/") +
-    (ref ? "?ref=" + encodeURIComponent(ref) : "");
+  const url = "https://api.github.com/repos/" + repo + "/contents/" + path.split("/").filter(Boolean).map(encodeURIComponent).join("/");
   let r;
   try {
     r = await fetch(url, {
@@ -122,6 +132,7 @@ export async function fileRequest(env, code, body, rootsOverride) {
     const entries = j
       .filter((e) => e && (e.type === "dir" || (e.type === "file" && FILE_EXT_RE.test(e.name))))
       .filter((e) => e.name.toLowerCase() !== ".github")
+      .filter((e) => !sensitive(env, e.path))
       .filter((e) => allowed(roots, repo, e.path, e.type === "dir"))
       .map((e) => ({ name: e.name, path: e.path, type: e.type, size: e.size }))
       .sort((a, b) => (a.type === b.type ? (a.name < b.name ? -1 : 1) : a.type === "dir" ? -1 : 1))
@@ -129,6 +140,11 @@ export async function fileRequest(env, code, body, rootsOverride) {
     return { status: 200, body: { type: "dir", repo, path, entries } };
   }
   if (!j || j.type !== "file") return { status: 400, body: { error: "not_a_file" } };
+  // A symlink makes GitHub answer with its TARGET (type "file", the target's path and name), which may be anywhere
+  // in the repo: only serve exactly the path that was asked for.
+  if ((j.path !== undefined && j.path !== path) || (j.name !== undefined && j.name !== path.split("/").pop())) {
+    return { status: 403, body: { error: "path_not_allowed" } };
+  }
   if (!allowed(roots, repo, path, false)) return { status: 403, body: { error: "path_not_allowed" } };
   if (!FILE_EXT_RE.test(j.name || path)) return { status: 415, body: { error: "not_text", hint: ".md, .markdown or .txt only" } };
   if (j.size > maxBytes) return { status: 413, body: { error: "file_too_large", size: j.size, maxBytes } };
@@ -136,6 +152,6 @@ export async function fileRequest(env, code, body, rootsOverride) {
   const sha = String(j.sha || "");
   return {
     status: 200,
-    body: { type: "file", repo, path, ref: ref || null, sha, size: j.size, text, header: "[file: " + repo + "/" + path + "@" + sha.slice(0, 7) + "]" },
+    body: { type: "file", repo, path, sha, size: j.size, text, header: "[file: " + repo + "/" + path + "@" + sha.slice(0, 7) + "]" },
   };
 }

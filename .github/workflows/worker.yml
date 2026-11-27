@@ -22,7 +22,7 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 22
-      - run: node --test test/token.test.js test/log.test.js test/features.test.js test/artifact.test.js test/files.test.js test/ui.test.js test/pages.test.js test/voice.test.js test/agents.test.js test/turns.test.js test/stop.test.js test/group.test.js test/agentlogs.test.js test/rail.test.js test/replies.test.js
+      - run: node --test test/token.test.js test/log.test.js test/features.test.js test/artifact.test.js test/files.test.js test/ui.test.js test/pages.test.js test/voice.test.js test/agents.test.js test/turns.test.js test/stop.test.js test/group.test.js test/agentlogs.test.js test/rail.test.js test/replies.test.js test/owners.test.js
 
   deploy:
     needs: test
@@ -34,6 +34,7 @@ jobs:
       HAS_ACCESS_CODES: ${{ secrets.ACCESS_CODES != '' }}
       HAS_ARTIFACT_TOKEN: ${{ secrets.ARTIFACT_REPO_TOKEN != '' }}
       HAS_AGENTS: ${{ secrets.AGENTS != '' }}
+      HAS_OWNER_PEPPER: ${{ secrets.OWNER_PEPPER != '' }}
     steps:
       - uses: actions/checkout@v4
       - name: Skip notice
@@ -89,6 +90,16 @@ jobs:
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
           ARTIFACT_REPO_TOKEN: ${{ secrets.ARTIFACT_REPO_TOKEN }}
         run: printf '%s' "$ARTIFACT_REPO_TOKEN" | npx --yes wrangler@3 secret put ARTIFACT_REPO_TOKEN
+      - name: Set conversation ownership pepper (TODO #49)
+        if: env.CF_TOKEN != '' && env.HAS_OWNER_PEPPER == 'true'
+        working-directory: worker
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          OWNER_PEPPER: ${{ secrets.OWNER_PEPPER }}
+        run: |
+          if [ "${#OWNER_PEPPER}" -lt 32 ]; then echo "OWNER_PEPPER must be at least 32 characters (e.g. openssl rand -hex 32)" >&2; exit 1; fi
+          printf '%s' "$OWNER_PEPPER" | npx --yes wrangler@3 secret put OWNER_PEPPER
       - name: Optional features status
         if: env.CF_TOKEN != ''
         run: |
@@ -96,3 +107,4 @@ jobs:
           echo "Attachments saved:  ${{ (env.HAS_LOG_TOKEN == 'true' || env.HAS_ARTIFACT_TOKEN == 'true') && 'ON (token must include agent-webchat-artifcats-1)' || 'off (add LOG_REPO_TOKEN)' }}"
           echo "Per-person codes:   ${{ env.HAS_ACCESS_CODES == 'true' && 'ON' || 'off (add ACCESS_CODES)' }}"
           echo "Extra agents:       ${{ env.HAS_AGENTS == 'true' && 'ON' || 'off (add AGENTS, see docs/AGENTS.md)' }}"
+          echo "Ownership check:    ${{ env.HAS_OWNER_PEPPER == 'true' && 'ON (needs logging)' || 'off (add OWNER_PEPPER, see docs/OWNERSHIP.md)' }}"

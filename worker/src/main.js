@@ -154,6 +154,24 @@ function withAgentHeader(res) {
   return new Response(res.body, { status: res.status, statusText: res.statusText, headers: h });
 }
 
+/** Paths handled here, not by index.js (they need their own CORS preflight). */
+export const OWN_ROUTES = new Set(["/agents"]);
+
+function preflight(request, env) {
+  const origin = originOf(request, env);
+  if (!origin) return json({ error: "origin_not_allowed" }, 403, null);
+  return new Response(null, {
+    status: 204,
+    headers: {
+      "Access-Control-Allow-Origin": origin,
+      "Access-Control-Allow-Methods": "POST, OPTIONS",
+      "Access-Control-Allow-Headers": "Content-Type, X-Access-Code, X-Agent",
+      "Access-Control-Max-Age": "600",
+      Vary: "Origin",
+    },
+  });
+}
+
 async function handleAgents(request, env, registry) {
   const origin = originOf(request, env);
   if (!origin) return json({ error: "origin_not_allowed" }, 403, null);
@@ -179,6 +197,9 @@ export default {
     const registry = agentRegistry(env);
     const env0 = baseEnv(env, registry);
 
+    // Routes main.js answers itself: index.js doesn't know them and would answer their CORS preflight with 404, which
+    // made browsers block POST /agents (it sends X-Access-Code) - the picker never appeared. Fixed 2026-11-27.
+    if (request.method === "OPTIONS" && OWN_ROUTES.has(url.pathname)) return preflight(request, env);
     if (request.method === "OPTIONS") return withAgentHeader(await worker.fetch(request, env0, ctx));
     if (url.pathname === "/agents") return handleAgents(request, env, registry);
     if (url.pathname === "/health") {

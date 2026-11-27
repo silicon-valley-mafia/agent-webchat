@@ -36,6 +36,7 @@ window.AGENT_WEBCHAT_CONFIG = {
   sessionRail: true,          // web/rail.js - ☰ Chats sidebar: several conversations (any agent) stay open, switch instantly (TODO #23)
   liveSessions: 4,            // conversations kept connected at once in one tab (current + 3); the oldest idle one closes first
   sendRole: true,             // web/role.js - tell the agent the code's role (owner/admin/user/readOnly) at chat start; advisory (TODO #7)
+  insertFile: true,           // web/insert.js - 📄 File: insert a .md/.txt from an allowed repo path into the message (TODO #37a)
 
   // Session panel (ⓘ) links - private repos, links only work for people with access
   logTimeZone: "Asia/Kolkata",

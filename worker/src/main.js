@@ -19,6 +19,7 @@
  *   entries "num": 2, 3, ...); index.js writes logs/<num>/AGENT.md once to say which agent a number is.
  */
 import worker, { identify, rateLimited, json } from "./index.js";
+import { fileRequest } from "./repofile.js";
 
 export const AGENT_ID_RE = /^[a-z0-9][a-z0-9_-]{0,31}$/;
 const DL_ROUTES = new Set(["/token", "/resume", "/log", "/export"]);
@@ -155,7 +156,7 @@ function withAgentHeader(res) {
 }
 
 /** Paths handled here, not by index.js (they need their own CORS preflight). */
-export const OWN_ROUTES = new Set(["/agents"]);
+export const OWN_ROUTES = new Set(["/agents", "/file"]);
 
 function preflight(request, env) {
   const origin = originOf(request, env);
@@ -191,6 +192,25 @@ async function handleAgents(request, env, registry) {
   return json({ agents: allowed.map(publicAgent), default: d.agent ? d.agent.id : null, person: person.name }, 200, origin);
 }
 
+/** TODO #37a: POST /file -> worker/src/repofile.js (allow-list per code, read-only token). */
+async function handleFile(request, env) {
+  const origin = originOf(request, env);
+  if (!origin) return json({ error: "origin_not_allowed" }, 403, null);
+  if (request.method !== "POST") return json({ error: "method_not_allowed" }, 405, origin);
+  const ip = request.headers.get("CF-Connecting-IP") || "unknown";
+  if (rateLimited("api:" + ip, parseInt(env.API_RATE_LIMIT_PER_MIN || "60", 10))) return json({ error: "rate_limited" }, 429, origin);
+  const code = request.headers.get("X-Access-Code") || "";
+  const person = await identify(env, code);
+  if (!person) {
+    rateLimited("tok:" + ip, parseInt(env.RATE_LIMIT_PER_MIN || "10", 10));
+    return json({ error: "bad_access_code" }, 401, origin);
+  }
+  let body = {};
+  try { body = (await request.json()) || {}; } catch (e) { body = {}; }
+  const r = await fileRequest(env, code, body);
+  return json(r.body, r.status, origin);
+}
+
 export default {
   async fetch(request, env, ctx) {
     const url = new URL(request.url);
@@ -202,6 +222,7 @@ export default {
     if (request.method === "OPTIONS" && OWN_ROUTES.has(url.pathname)) return preflight(request, env);
     if (request.method === "OPTIONS") return withAgentHeader(await worker.fetch(request, env0, ctx));
     if (url.pathname === "/agents") return handleAgents(request, env, registry);
+    if (url.pathname === "/file") return handleFile(request, env);
     if (url.pathname === "/health") {
       const res = await worker.fetch(request, env0, ctx);
       const j = await res.json().catch(() => ({}));

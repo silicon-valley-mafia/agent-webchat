@@ -17,12 +17,13 @@
   };
   var K = {
     code: "agentAccessCode", theme: "agentTheme", notify: "agentNotify", last: "agentLastSession", logged: "agentLogged",
-    width: "agentWidth", cleared: "agentCleared", collapse: "agentCollapse:", skin: "agentSkin", draft: "agentDraft:"
+    width: "agentWidth", cleared: "agentCleared", collapse: "agentCollapse:", skin: "agentSkin", draft: "agentDraft:", recent: "agentRecentSessions"
   };
   // TODO #26: skins live in web/skins.js (styleOptions overrides) + app.css ([data-skin]); Classic if it failed to load.
   var SKINS = window.AgentSkins || { classic: { label: "Classic" } };
   var SKIN_ORDER = (window.AgentSkinOrder || ["classic"]).filter(function (k) { return SKINS[k]; });
   var RESUME_MAX_AGE_MS = 24 * 3600 * 1000;
+  var RECENT_MAX = cfg.recentSessions || 8;
   var LOG_DEBOUNCE_MS = 4000;
   var TITLE = cfg.title || "Agent";
   var KEEP_EXPANDED = typeof cfg.expandedRecentReplies === "number" ? cfg.expandedRecentReplies : 3;
@@ -37,6 +38,8 @@
 
   $("title").textContent = TITLE;
   document.title = TITLE;
+  // Pages caches files for 10 min: a new app.js with an old cached index.html would miss these helper files.
+  if (!window.AgentSessions || !window.AgentMarkdown) { el.status.textContent = "This page was just updated - please reload it (Ctrl+Shift+R)."; return; }
 
   var MESSAGES = {
     bad_access_code: "Wrong access code.",
@@ -831,85 +834,18 @@
     setTimeout(function () { undo.remove(); }, 10000);
   }
 
-  // ---------------- session info (TODO #22) ----------------
-  /** Earliest server timestamp in the store (ignores our local aw/refresh events); 0 if none. */
-  function firstActivityTime(s) {
-    var first = 0;
-    try {
-      s.store.getState().activities.forEach(function (a) {
-        if (a && a.type === "event" && a.name === "aw/refresh") return;
-        var t = Date.parse((a && a.timestamp) || "");
-        if (t && (!first || t < first)) first = t;
-      });
-    } catch (e) {}
-    return first;
-  }
-  function showSession() {
-    var s = current;
-    if (!s) return;
-    openPanel("This session");
-    el.panelBody.innerHTML = "";
-    var tz = cfg.logTimeZone || "Asia/Kolkata";
-    var first = firstActivityTime(s);
-    // P10: log/upload folders are dated by the conversation's FIRST activity, not by when this tab attached
-    var day = U ? U.dayIn(new Date(first || s.startedAt), tz) : "";
-    var msgs = 0;
-    try { msgs = s.store.getState().activities.filter(function (a) { return a.type === "message"; }).length; } catch (e) {}
-    var rows = [
-      ["Conversation id", s.conversationId || "(not connected yet)", true],
-      ["User id", s.userId, true],
-      ["Person", s.name ? s.name + (s.admin ? " (admin)" : "") : "-"],
-      ["Agent", TITLE],
-      ["Started", first ? new Date(first).toLocaleString() : new Date(s.startedAt).toLocaleString()],
-      ["Opened in this tab", new Date(s.startedAt).toLocaleString() + (s.resumed ? " (resumed)" : "")],
-      ["Messages on screen", String(msgs)],
-      ["Cleared at", clearedAt(s) ? new Date(clearedAt(s)).toLocaleString() : "-"]
-    ];
-    var doc = document.createElement("div");
-    doc.className = "transcript";
-    rows.forEach(function (r) {
-      var row = document.createElement("div");
-      row.className = "kv";
-      var k = document.createElement("span");
-      k.textContent = r[0];
-      var v = document.createElement("code");
-      v.textContent = r[1];
-      row.appendChild(k);
-      row.appendChild(v);
-      if (r[2] && r[1]) {
-        var b = button("Copy", function () { copyText(r[1], b); });
-        b.className = "small";
-        row.appendChild(document.createTextNode(" "));
-        row.appendChild(b);
-      }
-      doc.appendChild(row);
-    });
-    var links = [];
-    if (cfg.logRepo !== "" && day) links.push(["Transcript folders for " + day, "https://github.com/" + (cfg.logRepo || "silicon-valley-mafia/agent-webchat-logs") + "/tree/main/logs/" + day]);
-    if (cfg.artifactRepo !== "" && day) links.push(["Uploads for " + day, "https://github.com/" + (cfg.artifactRepo || "silicon-valley-mafia/agent-webchat-artifcats-1") + "/tree/main/webchat-uploads/" + day]);
-    if (links.length) {
-      var p = document.createElement("p");
-      p.className = "muted";
-      p.textContent = "Private repos - links work only for people with access. Look for the folder ending in --" + (s.conversationId || "") + ":";
-      doc.appendChild(p);
-      links.forEach(function (l) {
-        var a = document.createElement("a");
-        a.href = l[1]; a.target = "_blank"; a.rel = "noopener"; a.textContent = l[0];
-        var d = document.createElement("div");
-        d.appendChild(a);
-        doc.appendChild(d);
-      });
-    }
-    el.panelBody.appendChild(doc);
-  }
+  // ---------------- session info + remembered sessions: web/sessions.js ----------------
+  var SS = window.AgentSessions({
+    cfg: cfg, U: U, el: el, K: K, TITLE: TITLE, RECENT_MAX: RECENT_MAX, jsonGet: jsonGet,
+    current: function () { return current; }, openPanel: function (t) { openPanel(t); }, closePanel: function () { closePanel(); },
+    button: function (l, f, c) { return button(l, f, c); }, copyText: function (t, b) { return copyText(t, b); },
+    clearedAt: function (s) { return clearedAt(s); }, notice: function (t, o) { notice(t, o); },
+    resume: function (c, i, u) { return resumeConversation(c, i, u); }
+  });
+  var firstActivityTime = SS.firstActivityTime, showSession = SS.showSession, rememberSession = SS.rememberSession,
+    lastSession = SS.lastSession, recentSessions = SS.recentSessions, recentBlock = SS.recentBlock;
 
   // ---------------- sessions ----------------
-  function rememberSession(s) {
-    localStorage.setItem(K.last, JSON.stringify({ conversationId: s.conversationId, userId: s.userId, at: Date.now() }));
-  }
-  function lastSession() {
-    try { return JSON.parse(localStorage.getItem(K.last) || "null"); } catch (e) { return null; }
-  }
   function stopSession(s, flush) {
     if (!s) return;
     clearTimeout(s.logTimer);
@@ -1059,37 +995,9 @@
   }
 
   // ---------------- history ----------------
-  function esc(s) { return String(s).replace(/[&<>"']/g, function (c) { return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]; }); }
-  function inline(s) {
-    return esc(s).replace(/`([^`]+)`/g, "<code>$1</code>").replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>");
-  }
-  /** Small, safe Markdown subset for transcripts: everything is escaped first. */
-  function renderMarkdown(md) {
-    var out = [], inCode = false, code = [];
-    String(md).split("\n").forEach(function (line) {
-      if (/^```/.test(line)) {
-        if (inCode) { out.push("<pre>" + esc(code.join("\n")) + "</pre>"); code = []; }
-        inCode = !inCode;
-        return;
-      }
-      if (inCode) { code.push(line); return; }
-      if (/^<\/?details>|^<summary>|^<details>/.test(line)) return;
-      if (/^\|[-| ]+\|$/.test(line) || line === "| | |") return;
-      var m;
-      if ((m = /^(#{1,3}) (.*)$/.exec(line))) { out.push("<h" + (m[1].length + 1) + ">" + inline(m[2]) + "</h" + (m[1].length + 1) + ">"); return; }
-      if ((m = /^\| (.*?) \| (.*) \|$/.exec(line))) { out.push("<div class='kv'><span>" + inline(m[1]) + "</span> " + inline(m[2]) + "</div>"); return; }
-      if (line === "---") { out.push("<hr>"); return; }
-      if ((m = /^> (.*)$/.exec(line))) { out.push("<blockquote>" + inline(m[1]) + "</blockquote>"); return; }
-      out.push(line ? "<p>" + inline(line) + "</p>" : "");
-    });
-    if (inCode) out.push("<pre>" + esc(code.join("\n")) + "</pre>");
-    return out.join("\n");
-  }
-  function parseIds(md) {
-    var c = /\| Conversation ID \| `([^`]+)` \|/.exec(md);
-    var u = /\| User ID \| `([^`]*)` \|/.exec(md);
-    return { conversationId: c ? c[1] : null, userId: u && u[1] ? u[1] : null };
-  }
+  // Markdown / transcript helpers live in web/markdown.js (keeps this file small enough to edit).
+  var MD = window.AgentMarkdown || {};
+  var esc = MD.esc, renderMarkdown = MD.renderMarkdown, parseIds = MD.parseIds, fileName = MD.fileName;
   function button(label, onClick, cls) {
     var b = document.createElement("button");
     b.type = "button";
@@ -1098,8 +1006,6 @@
     b.addEventListener("click", onClick);
     return b;
   }
-  /** logs/2026-11-27/0140-deepesh--conv  ->  2026-11-27_0140-deepesh--conv.md */
-  function fileName(item) { return item.path.split("/").slice(1).join("_") + ".md"; }
   function openPanel(title) { el.panelTitle.textContent = title; el.panel.hidden = false; el.panelBody.innerHTML = "<p class='muted'>Loading…</p>"; }
   function closePanel() { el.panel.hidden = true; }
 
@@ -1135,8 +1041,10 @@
     openPanel("Conversation history");
     return api("/history", code).then(function (j) {
       el.panelBody.innerHTML = "";
-      if (j.reason === "logging_disabled") { el.panelBody.innerHTML = "<p class='muted'>" + esc(MESSAGES.logging_disabled) + "</p>"; return; }
-      if (!j.items.length) { el.panelBody.innerHTML = "<p class='muted'>No saved conversations yet.</p>"; return; }
+      var rb = recentBlock(code);
+      if (rb) el.panelBody.appendChild(rb);
+      if (j.reason === "logging_disabled") { el.panelBody.insertAdjacentHTML("beforeend", "<p class='muted'>" + esc(MESSAGES.logging_disabled) + "</p>"); return; }
+      if (!j.items.length) { el.panelBody.insertAdjacentHTML("beforeend", "<p class='muted'>No saved conversations yet.</p>"); return; }
       var lastDate = null;
       j.items.forEach(function (item) {
         if (item.date !== lastDate) {
@@ -1184,6 +1092,8 @@
     stopSession(s, true);
     localStorage.removeItem(K.code);
     localStorage.removeItem(K.last);
+    localStorage.removeItem(K.recent);
+    try { sessionStorage.removeItem(K.last); } catch (e) {}
     el.code.value = "";
     el.who.textContent = "";
     sessionButtons(false);
@@ -1326,6 +1236,7 @@
     stagedOnlySubmit: stagedOnlySubmit, isAgentError: isAgentError, clearMarker: clearMarker,
     skins: SKINS, skinMode: skinMode, loadDraft: loadDraft, markSent: markSent, agentMessage: agentMessage, agentTyping: agentTyping,
     firstActivityTime: firstActivityTime, applyTheme: function () { applyTheme(); },
+    rememberSession: rememberSession, lastSession: lastSession, recentSessions: recentSessions, recentBlock: recentBlock,
     decorate: function () { decorate(current); }, activityMiddleware: activityMiddleware, clearChat: clearChat
   };
 })();

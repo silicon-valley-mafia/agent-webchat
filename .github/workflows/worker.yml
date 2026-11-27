@@ -5,7 +5,7 @@ on:
     branches: [main]
     paths: ["worker/**", ".github/workflows/worker.yml"]
   pull_request:
-    paths: ["worker/**", "web/files.js", "web/ui.js", "web/voice.js", "web/agents.js", "web/turns.js", "web/stop.js", "web/group.js", "web/rail.js", "web/timestamps.js", "web/replies.js", "web/role.js", "web/insert.js", "web/route.js", "web/header.js", ".github/workflows/worker.yml"]
+    paths: ["worker/**", "web/files.js", "web/ui.js", "web/voice.js", "web/agents.js", "web/turns.js", "web/stop.js", "web/group.js", "web/rail.js", "web/timestamps.js", "web/replies.js", "web/role.js", "web/insert.js", "web/route.js", "web/header.js", "web/copyprompt.js", ".github/workflows/worker.yml"]
   workflow_dispatch:
 
 permissions:
@@ -22,7 +22,7 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 22
-      - run: node --test test/token.test.js test/log.test.js test/features.test.js test/artifact.test.js test/files.test.js test/ui.test.js test/pages.test.js test/voice.test.js test/agents.test.js test/turns.test.js test/stop.test.js test/group.test.js test/agentlogs.test.js test/rail.test.js test/replies.test.js test/owners.test.js test/role.test.js test/preflight.test.js test/repofile.test.js test/route.test.js test/agentuploads.test.js test/config.test.js
+      - run: node --test test/token.test.js test/log.test.js test/features.test.js test/artifact.test.js test/files.test.js test/ui.test.js test/pages.test.js test/voice.test.js test/agents.test.js test/turns.test.js test/stop.test.js test/group.test.js test/agentlogs.test.js test/rail.test.js test/replies.test.js test/owners.test.js test/role.test.js test/preflight.test.js test/repofile.test.js test/route.test.js test/agentuploads.test.js test/config.test.js test/copyprompt.test.js test/config53.test.js
 
   deploy:
     needs: test
@@ -38,6 +38,7 @@ jobs:
       HAS_FILE_TOKEN: ${{ secrets.FILE_READ_TOKEN != '' }}
       HAS_OWNER_FILES: ${{ secrets.OWNER_FILES != '' }}
       HAS_SYSTEM_PAT: ${{ secrets.AGENT_SYSTEM_PAT != '' }}
+      HAS_AGENT_SECRETS: ${{ secrets.AGENT_SECRETS != '' }}
     steps:
       - uses: actions/checkout@v4
       - name: Skip notice
@@ -119,6 +120,16 @@ jobs:
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
           AGENT_SYSTEM_PAT: ${{ secrets.AGENT_SYSTEM_PAT }}
         run: printf '%s' "$AGENT_SYSTEM_PAT" | npx --yes wrangler@3 secret put AGENT_SYSTEM_PAT
+      - name: Set named agent secrets (TODO #53, config repo "secretName")
+        if: env.CF_TOKEN != '' && env.HAS_AGENT_SECRETS == 'true'
+        working-directory: worker
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          AGENT_SECRETS: ${{ secrets.AGENT_SECRETS }}
+        run: |
+          printf '%s' "$AGENT_SECRETS" | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{try{const o=JSON.parse(s);if(!o||typeof o!=="object"||Array.isArray(o))throw 0;const k=Object.keys(o);for(const n of k){if(!/^[A-Z][A-Z0-9_]{0,63}$/.test(n))throw "bad name "+n;if(typeof o[n]!=="string"||!o[n])throw n+" is empty"}console.log("AGENT_SECRETS OK: "+k.length+" named secrets ("+k.join(", ")+")")}catch(e){console.error("AGENT_SECRETS must be JSON like {\"DL_SPARK\":\"<Direct Line secret>\"}: "+(typeof e==="string"?e:"not a JSON object"));process.exit(1)}})'
+          printf '%s' "$AGENT_SECRETS" | npx --yes wrangler@3 secret put AGENT_SECRETS
       - name: Set owner's Insert file allow-list (TODO #37a)
         if: env.CF_TOKEN != '' && env.HAS_OWNER_FILES == 'true'
         working-directory: worker
@@ -139,3 +150,5 @@ jobs:
           echo "Ownership check:    ${{ env.HAS_OWNER_PEPPER == 'true' && 'ON (needs logging)' || 'off (add OWNER_PEPPER, see docs/OWNERSHIP.md)' }}"
           echo "Insert file:        ${{ (env.HAS_FILE_TOKEN == 'true' || env.HAS_SYSTEM_PAT == 'true') && 'ON (folders = files key in the config repo)' || 'off (add AGENT_SYSTEM_PAT, see docs/CONFIG.md)' }}"
           echo "Config repo:        ${{ env.HAS_SYSTEM_PAT == 'true' && 'ON (agent-webchat-config @ main, config/people.json)' || 'no AGENT_SYSTEM_PAT - config repo unreadable, secrets apply (docs/CONFIG.md)' }}"
+          echo "Named secrets:      ${{ env.HAS_AGENT_SECRETS == 'true' && 'ON (AGENT_SECRETS, for secretName in the config repo)' || 'none (add AGENT_SECRETS to wire new agents from the config repo)' }}"
+          echo "Live check:         GET /health -> config: on | stale | error | off"

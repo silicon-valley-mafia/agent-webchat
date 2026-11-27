@@ -5,6 +5,10 @@ on:
     branches: [main]
     paths: ["web/**", ".github/workflows/pages.yml"]
   workflow_dispatch:
+  # Lets agents/tools re-run a deploy through the API (POST /repos/{owner}/{repo}/dispatches,
+  # event_type "deploy-pages"), e.g. after a transient GitHub Pages failure.
+  repository_dispatch:
+    types: [deploy-pages]
 
 permissions:
   contents: read

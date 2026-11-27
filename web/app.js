@@ -13,7 +13,7 @@
     panelBody: $("historybody"), panelTitle: $("historytitle"), panelClose: $("historyclose"), notice: $("notice"),
     noticeText: $("noticetext"), noticeClose: $("noticeclose"),
     upState: $("upstate"), drop: $("dropzone"), clear: $("clearchat"), session: $("sessionbtn"), width: $("widthbtn"),
-    expandAll: $("expandall"), work: $("workstate"), staged: $("staged"), skin: $("skinbtn")
+    expandAll: $("expandall"), work: $("workstate"), staged: $("staged"), skin: $("skinbtn"), queued: $("queued")
   };
   var K = {
     code: "agentAccessCode", theme: "agentTheme", notify: "agentNotify", last: "agentLastSession", logged: "agentLogged",
@@ -519,6 +519,7 @@
     s.pendingSince = 0;
     s.queued = 0;
     if (s === current) paintWork();
+    if (Q && Q.items(s).length) Q.release(s); // TODO #35: next queued prompt
   }
   // P7: Copilot Studio often answers one turn with several messages (typing -> message -> typing -> message).
   // Keep "working" until the agent has been quiet for a moment instead of clearing on the first message.
@@ -598,15 +599,16 @@
           var act = type === "DIRECT_LINE/POST_ACTIVITY" && action.payload && action.payload.activity;
           if (!s || !act || act.type !== "message" || (act.channelData && act.channelData.awPrepared)) return next(action);
 
+          var queued = !!(action.meta && action.meta.awQueued);
           // staged files join the typed message (TODO #10)
-          if (staged.length) {
+          if (staged.length && !queued) {
             act = Object.assign({}, act, { attachments: (act.attachments || []).concat(toAttachments(takeStaged())) });
             action = Object.assign({}, action, { payload: Object.assign({}, action.payload, { activity: act }) });
           }
 
           // anti double-send (TODO #13)
           var now = Date.now();
-          if (!(act.attachments && act.attachments.length) && U && U.isDuplicate(act.text, s.lastSent, now, 30000)) {
+          if (!queued && !(act.attachments && act.attachments.length) && U && U.isDuplicate(act.text, s.lastSent, now, 30000)) {
             var ago = Math.round((now - s.lastSent.at) / 1000);
             if (!window.confirm("You sent the same message " + ago + "s ago" + (s.pendingSince ? " and the agent is still working on it" : "") + ". Send it again?")) {
               storeApi.dispatch({ type: "WEB_CHAT/SET_SEND_BOX", payload: { text: act.text || "" } });
@@ -614,6 +616,8 @@
             }
           }
           s.lastSent = { text: act.text || "", at: now };
+          // TODO #35: while the agent is still answering, hold the message and send it when the turn is over
+          if (!queued && Q && Q.hold(s, action)) return;
           markSent(s);
 
           if (!F || !act.attachments || !act.attachments.length) return next(action);
@@ -845,9 +849,24 @@
   var firstActivityTime = SS.firstActivityTime, showSession = SS.showSession, rememberSession = SS.rememberSession,
     lastSession = SS.lastSession, recentSessions = SS.recentSessions, recentBlock = SS.recentBlock;
 
+  // ---------------- prompt queue (TODO #35): web/queue.js ----------------
+  var Q = window.AgentQueue ? window.AgentQueue({
+    cfg: cfg, el: el, current: function () { return current; },
+    button: function (l, f, c) { return button(l, f, c); }, notice: function (t, o) { notice(t, o); },
+    dispatch: function (s, a) { if (s.store) s.store.dispatch(a); },
+    setSendBox: function (s, t) { if (s.store) s.store.dispatch({ type: "WEB_CHAT/SET_SEND_BOX", payload: { text: t } }); },
+    restage: function (atts) {
+      Promise.all(atts.map(function (a) {
+        return fetch(a.contentUrl).then(function (r) { return r.blob(); })
+          .then(function (b) { return new File([b], a.name || "file", { type: a.contentType || b.type || "" }); });
+      })).then(stageFiles, function () { notice("Couldn't put the attached files back - please attach them again."); });
+    }
+  }) : null;
+
   // ---------------- sessions ----------------
   function stopSession(s, flush) {
     if (!s) return;
+    if (Q) Q.drop(s);
     clearTimeout(s.logTimer);
     clearTimeout(s.decorateTimer);
     clearTimeout(s.replyTimer);
@@ -1199,6 +1218,9 @@
     if (current) sendFiles(Array.prototype.slice.call(e.dataTransfer.files || []));
   }, true);
 
+  window.addEventListener("beforeunload", function (e) {
+    if (current && Q && Q.items(current).length) { e.preventDefault(); e.returnValue = ""; }
+  });
   document.addEventListener("visibilitychange", function () {
     if (document.visibilityState === "visible") { unread = 0; document.title = TITLE; return; }
     if (current && current.dirty) { clearTimeout(current.logTimer); saveLog(current, { keepalive: true }); }
@@ -1237,6 +1259,7 @@
     skins: SKINS, skinMode: skinMode, loadDraft: loadDraft, markSent: markSent, agentMessage: agentMessage, agentTyping: agentTyping,
     firstActivityTime: firstActivityTime, applyTheme: function () { applyTheme(); },
     rememberSession: rememberSession, lastSession: lastSession, recentSessions: recentSessions, recentBlock: recentBlock,
+    queue: Q, markReplied: markReplied,
     decorate: function () { decorate(current); }, activityMiddleware: activityMiddleware, clearChat: clearChat
   };
 })();

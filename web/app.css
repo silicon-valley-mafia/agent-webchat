@@ -49,6 +49,16 @@ header button:disabled { opacity: .5; cursor: default; }
 #staged button.primary { background: #2563eb; color: #fff; border-color: #2563eb; }
 #staged button.x { border: 0; padding: 0 4px; }
 
+/* TODO #35: messages typed while the agent is still answering wait here, then go out one at a time */
+#queued { border-top: 1px solid var(--border); padding: 6px 10px; background: var(--panel); max-height: 25vh; overflow: auto; font-size: 13px; }
+#queued .bar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-bottom: 6px; }
+#queued .chips { display: flex; flex-direction: column; gap: 4px; }
+#queued .chip { display: flex; align-items: center; gap: 6px; background: var(--chip); border: 1px dashed var(--border); border-radius: 8px; padding: 3px 4px 3px 8px; }
+#queued .chip span { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+#queued button { background: transparent; color: var(--text); border: 1px solid var(--border); border-radius: 6px; padding: 2px 9px; cursor: pointer; }
+#queued button.primary { background: #2563eb; color: #fff; border-color: #2563eb; }
+#queued button.x { border: 0; padding: 0 4px; }
+
 /* TODO #14: readable links in bubbles (dark theme especially) */
 #chatwrap .webchat__bubble:not(.webchat__bubble--from-user) a { color: var(--link); }
 #chatwrap .webchat__bubble:not(.webchat__bubble--from-user) a:visited { color: var(--link-visited); }
@@ -99,7 +109,7 @@ header button:disabled { opacity: .5; cursor: default; }
 /* TODO #26: skins (🎨). Web Chat's own colours come from SKINS in app.js; these rules cover the page around it. */
 /* Focus: one centered reading column, replies without bubbles */
 [data-skin="focus"] #chatwrap > div { max-width: 860px; margin: 0 auto; }
-[data-skin="focus"] #staged { max-width: 860px; width: 100%; margin: 0 auto; box-sizing: border-box; border-radius: 12px 12px 0 0; }
+[data-skin="focus"] #staged, [data-skin="focus"] #queued { max-width: 860px; width: 100%; margin: 0 auto; box-sizing: border-box; border-radius: 12px 12px 0 0; }
 [data-skin="focus"] #chatwrap .webchat__bubble:not(.webchat__bubble--from-user) { line-height: 1.6; }
 /* High contrast: WCAG AAA colours, bigger text, strong focus rings, tools always visible */
 [data-skin="contrast"] {
@@ -114,7 +124,7 @@ header button:disabled { opacity: .5; cursor: default; }
 }
 [data-skin="contrast"] body { font-size: 17px; }
 [data-skin="contrast"] :focus-visible { outline: 3px solid #ff8c00 !important; outline-offset: 2px; }
-[data-skin="contrast"] header button, [data-skin="contrast"] #staged button, [data-skin="contrast"] #history button { border-width: 2px; border-color: currentColor; }
+[data-skin="contrast"] header button, [data-skin="contrast"] #staged button, [data-skin="contrast"] #queued button, [data-skin="contrast"] #history button { border-width: 2px; border-color: currentColor; }
 [data-skin="contrast"] #who, [data-skin="contrast"] #logstate, [data-skin="contrast"] #upstate { color: var(--header-text); }
 [data-skin="contrast"] #chatwrap .aw-tools { opacity: 1; }
 [data-skin="contrast"] #chatwrap .aw-tools button { color: var(--text); border-color: var(--text); }

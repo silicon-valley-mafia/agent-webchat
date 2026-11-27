@@ -17,13 +17,15 @@
   var END = "\n[end of header]";
 
   /** Pure: the text the person typed, without a #51 session header block on top. */
-  api.stripHeader = function (text) {
+  function stripHeader0(text) {
     var t = String(text == null ? "" : text).replace(/\r\n/g, "\n");
     if (t.indexOf(HEAD) !== 0) return t.trim();
     var end = t.indexOf(END, HEAD.length - 1);
     if (end < 0) return t.trim();
     return t.slice(end + END.length).replace(/^\n+/, "").trim();
-  };
+  }
+  /** ...and a #37b "[route: coach]" line, so Copy / Reuse give back only what you typed. */
+  api.stripHeader = function (text) { return stripHeader0(text).replace(/^\[route: [A-Za-z0-9_-]+\]\n?/, "").trim(); };
 
   function legacyCopy(doc, text) {
     var ta = doc.createElement("textarea");

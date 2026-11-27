@@ -14,12 +14,19 @@
  *       "defaultAgent": "spark",
  *       "role": "owner" | "admin" | "user" | "readOnly",   advisory (#7); owner/admin only count for admin codes
  *       "files": ["owner/repo/folder/"],                📄 Insert file folders (#37a); replaces OWNER_FILES / "files"
- *       "header": { "text": "...", "every": 10 }        session header (#51): first message, then every N (0 = first only);
- *     }                                                 null = no header for this person even if a default exists
- *   }
+ *       "header": { "text": "...", "every": 10 },       session header (#51): first message, then every N (0 = first only);
+ *                                                       null = no header for this person even if a default exists
+ *       "codeHash": "<64 hex>", "name": "Ravi"          #53: access code as HMAC-SHA-256(OWNER_PEPPER, code); never admin
+ *     }
+ *   },
+ *   "agents": {                                         #53: non-secret agent settings, merged over the AGENTS secret
+ *     "spark": { "name": "SPARK", "initials": "SP", "num": 2, "routes": ["coach"], "secretName": "DL_SPARK" }
+ *   },                                                  secretName = a Worker secret, or a key of the AGENT_SECRETS secret
+ *   "repos": { "logs": "owner/repo", "artifacts": "owner/repo" }   #52: where NEW logs / uploads are written
  * }
  * A key set here wins over the same key in ACCESS_CODES; a key left out falls back to ACCESS_CODES.
- * NOT here (they stay Worker secrets): access codes, the admin flag, Direct Line secrets, tokens, OWNER_PEPPER.
+ * NOT here (they stay Worker secrets): plain access codes, the admin flag, Direct Line secrets, tokens, OWNER_PEPPER.
+ * A "secret" key under "agents" is ignored on purpose.
  *
  * Off: CONFIG_BRANCH unset or "off" -> everything comes from the secrets, exactly as before.
  * Missing file or branch (404) = empty config (the secrets apply).
@@ -55,6 +62,41 @@ export function normHeader(h) {
   return { text, every: Number.isInteger(n) && n > 0 ? Math.min(n, 1000) : 0 };
 }
 
+const AGENT_RE = /^[a-z0-9][a-z0-9_-]{0,31}$/;
+/** Name of a Worker secret (TODO #53): the config may NAME a secret, never contain one. */
+export const SECRET_NAME_RE = /^[A-Z][A-Z0-9_]{0,63}$/;
+/** owner/repo */
+export const REPO_RE = /^[A-Za-z0-9_.-]{1,100}\/[A-Za-z0-9_.-]{1,100}$/;
+const HASH_RE = /^[0-9a-f]{64}$/;
+const isObj = (v) => !!v && typeof v === "object" && !Array.isArray(v);
+
+/**
+ * TODO #53: non-secret agent settings. {"spark": {"name","description","initials","num","routes","secretName"}}.
+ * A "secret" key is ignored on purpose: Direct Line secrets stay Worker secrets; "secretName" says which one.
+ */
+function normAgents(raw) {
+  const out = {};
+  if (!isObj(raw)) return out;
+  for (const [id, v] of Object.entries(raw)) {
+    if (!AGENT_RE.test(id) || !isObj(v)) continue;
+    const a = {};
+    for (const k of ["name", "description", "initials"]) if (typeof v[k] === "string") a[k] = v[k];
+    if (v.num !== undefined) a.num = v.num;
+    if (Array.isArray(v.routes)) a.routes = v.routes.map(String).slice(0, 5);
+    if (typeof v.secretName === "string" && SECRET_NAME_RE.test(v.secretName)) a.secretName = v.secretName;
+    out[id] = a;
+  }
+  return out;
+}
+
+/** TODO #52: where new logs / uploads are written. {"logs": "owner/repo", "artifacts": "owner/repo"} */
+function normRepos(raw) {
+  const out = {};
+  if (!isObj(raw)) return out;
+  for (const k of ["logs", "artifacts"]) if (typeof raw[k] === "string" && REPO_RE.test(raw[k].trim())) out[k] = raw[k].trim();
+  return out;
+}
+
 /** Pure: the validated config from parsed JSON. Unknown keys and bad entries are dropped. */
 export function normalizeConfig(raw) {
   const out = { header: normHeader(raw && raw.header), people: {} };
@@ -68,8 +110,15 @@ export function normalizeConfig(raw) {
     if (typeof v.role === "string") e.role = v.role;
     if (Array.isArray(v.files)) e.files = v.files.map(String).slice(0, 50);
     if ("header" in v) e.header = normHeader(v.header);
+    // TODO #53: the person's access code as HMAC-SHA-256(OWNER_PEPPER, code), lower-case hex - never the code itself
+    if (typeof v.codeHash === "string" && HASH_RE.test(v.codeHash.trim().toLowerCase())) e.codeHash = v.codeHash.trim().toLowerCase();
+    if (typeof v.name === "string" && v.name.trim()) e.name = v.name.trim().slice(0, 60);
     out.people[slug] = e;
   }
+  const agents = normAgents(raw && raw.agents);
+  if (Object.keys(agents).length) out.agents = agents;
+  const repos = normRepos(raw && raw.repos);
+  if (Object.keys(repos).length) out.repos = repos;
   return out;
 }
 

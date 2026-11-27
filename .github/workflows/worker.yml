@@ -5,7 +5,7 @@ on:
     branches: [main]
     paths: ["worker/**", ".github/workflows/worker.yml"]
   pull_request:
-    paths: ["worker/**", "web/files.js", "web/ui.js", "web/voice.js", "web/agents.js", "web/turns.js", "web/stop.js", "web/group.js", "web/rail.js", "web/timestamps.js", "web/replies.js", "web/role.js", "web/insert.js", "web/route.js", ".github/workflows/worker.yml"]
+    paths: ["worker/**", "web/files.js", "web/ui.js", "web/voice.js", "web/agents.js", "web/turns.js", "web/stop.js", "web/group.js", "web/rail.js", "web/timestamps.js", "web/replies.js", "web/role.js", "web/insert.js", "web/route.js", "web/header.js", ".github/workflows/worker.yml"]
   workflow_dispatch:
 
 permissions:
@@ -22,7 +22,7 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 22
-      - run: node --test test/token.test.js test/log.test.js test/features.test.js test/artifact.test.js test/files.test.js test/ui.test.js test/pages.test.js test/voice.test.js test/agents.test.js test/turns.test.js test/stop.test.js test/group.test.js test/agentlogs.test.js test/rail.test.js test/replies.test.js test/owners.test.js test/role.test.js test/preflight.test.js test/repofile.test.js test/route.test.js test/agentuploads.test.js
+      - run: node --test test/token.test.js test/log.test.js test/features.test.js test/artifact.test.js test/files.test.js test/ui.test.js test/pages.test.js test/voice.test.js test/agents.test.js test/turns.test.js test/stop.test.js test/group.test.js test/agentlogs.test.js test/rail.test.js test/replies.test.js test/owners.test.js test/role.test.js test/preflight.test.js test/repofile.test.js test/route.test.js test/agentuploads.test.js test/config.test.js
 
   deploy:
     needs: test
@@ -128,4 +128,5 @@ jobs:
           echo "Per-person codes:   ${{ env.HAS_ACCESS_CODES == 'true' && 'ON' || 'off (add ACCESS_CODES)' }}"
           echo "Extra agents:       ${{ env.HAS_AGENTS == 'true' && 'ON' || 'off (add AGENTS, see docs/AGENTS.md)' }}"
           echo "Ownership check:    ${{ env.HAS_OWNER_PEPPER == 'true' && 'ON (needs logging)' || 'off (add OWNER_PEPPER, see docs/OWNERSHIP.md)' }}"
-          echo "Insert file:        ${{ env.HAS_FILE_TOKEN == 'true' && (env.HAS_OWNER_FILES == 'true' && 'ON' || 'token set, no OWNER_FILES') || 'off (add FILE_READ_TOKEN + OWNER_FILES, see docs/INSERT-FILE.md)' }}"
+          echo "Insert file:        ${{ env.HAS_FILE_TOKEN == 'true' && (env.HAS_OWNER_FILES == 'true' && 'ON' || 'token set; folders come from "files" in the config branch (docs/CONFIG.md)') || 'off (add FILE_READ_TOKEN, see docs/INSERT-FILE.md)' }}"
+          echo "Config branch:      CONFIG_BRANCH in worker/wrangler.toml (agent-webchat-logs @ config, config/people.json; needs LOG_REPO_TOKEN; see docs/CONFIG.md)"

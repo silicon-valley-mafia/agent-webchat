@@ -17,9 +17,12 @@
  *   role (TODO #7) = "owner" | "admin" | "user" | "readOnly" (ACCESS_CODES "role"); advisory, see personRole().
  * Transcripts (TODO #44): each agent logs into its own numbered folder logs/<num>/ (default agent = 1, AGENTS
  *   entries "num": 2, 3, ...); index.js writes logs/<num>/AGENT.md once to say which agent a number is.
+ * Config branch (TODO #51, src/config.js): per-person agents / defaultAgent / role / files / session header can come
+ *   from a private branch (CONFIG_BRANCH); a key set there wins over ACCESS_CODES. /token and /resume add {header}.
  */
 import worker, { identify, rateLimited, json } from "./index.js";
 import { fileRequest } from "./repofile.js";
+import { loadConfig, configEntry, personHeader } from "./config.js";
 
 export const AGENT_ID_RE = /^[a-z0-9][a-z0-9_-]{0,31}$/;
 const DL_ROUTES = new Set(["/token", "/resume", "/log", "/export"]);
@@ -93,16 +96,29 @@ export function agentRegistry(env) {
   return out;
 }
 
-/** Per-person agent rules from ACCESS_CODES (only read after identify() accepted the code). */
-export function personRules(env, code, person) {
-  if (person && person.admin) return { agents: null, defaultAgent: null };
+/**
+ * Per-person agent rules (only read after identify() accepted the code): the config branch entry (TODO #51) first,
+ * then ACCESS_CODES. Admin codes always get every agent (the config may only pick their default agent).
+ */
+export function personRules(env, code, person, cfg) {
+  const c = configEntry(cfg, person) || {};
+  const cDef = typeof c.defaultAgent === "string" ? c.defaultAgent : null;
+  if (person && person.admin) return { agents: null, defaultAgent: cDef };
   const v = (parseJson(env.ACCESS_CODES) || {})[code];
-  if (!v || typeof v !== "object") return { agents: null, defaultAgent: null };
-  const list = Array.isArray(v.agents) ? v.agents.map(String) : null;
+  const s = v && typeof v === "object" ? v : {};
+  const src = Array.isArray(c.agents) ? c.agents : Array.isArray(s.agents) ? s.agents : null;
+  const list = src ? src.map(String) : null;
   return {
     agents: list && list.indexOf("*") < 0 ? list : null,
-    defaultAgent: typeof v.defaultAgent === "string" ? v.defaultAgent : null,
+    defaultAgent: cDef || (typeof s.defaultAgent === "string" ? s.defaultAgent : null),
   };
+}
+
+/** TODO #51: the config branch, or a 503 for non-admins when it is on but has never been readable (fail closed). */
+async function configFor(env, person, origin) {
+  const cfg = await loadConfig(env);
+  if (cfg.error && !(person && person.admin)) return { deny: json({ error: "config_unavailable" }, 503, origin) };
+  return { cfg };
 }
 
 /**
@@ -112,10 +128,12 @@ export function personRules(env, code, person) {
  * reported for codes that really are admins ("admin": true); otherwise admin codes = "admin", everyone else "user".
  */
 export const ROLES = ["owner", "admin", "user", "readOnly"];
-export function personRole(env, code, person) {
+export function personRole(env, code, person, cfg) {
   if (env.ACCESS_CODE && code === env.ACCESS_CODE) return "owner";
+  const c = configEntry(cfg, person) || {};
   const v = (parseJson(env.ACCESS_CODES) || {})[code];
-  const r = v && typeof v === "object" && ROLES.indexOf(v.role) >= 0 ? v.role : "";
+  const raw = typeof c.role === "string" ? c.role : v && typeof v === "object" ? v.role : "";
+  const r = ROLES.indexOf(raw) >= 0 ? raw : "";
   const admin = !!(person && person.admin);
   if (r === "owner" || r === "admin") return admin ? r : "user";
   return r || (admin ? "admin" : "user");
@@ -192,7 +210,9 @@ async function handleAgents(request, env, registry) {
     rateLimited("tok:" + ip, parseInt(env.RATE_LIMIT_PER_MIN || "10", 10));
     return json({ error: "bad_access_code" }, 401, origin);
   }
-  const rules = personRules(env, code, person);
+  const cf = await configFor(env, person, origin);
+  if (cf.deny) return cf.deny;
+  const rules = personRules(env, code, person, cf.cfg);
   const allowed = allowedAgents(registry, rules);
   const d = pickAgent(registry, allowed, rules, "");
   return json({ agents: allowed.map(publicAgent), default: d.agent ? d.agent.id : null, person: person.name }, 200, origin);
@@ -211,9 +231,13 @@ async function handleFile(request, env) {
     rateLimited("tok:" + ip, parseInt(env.RATE_LIMIT_PER_MIN || "10", 10));
     return json({ error: "bad_access_code" }, 401, origin);
   }
+  const cf = await configFor(env, person, origin);
+  if (cf.deny) return cf.deny;
+  const c = configEntry(cf.cfg, person);
   let body = {};
   try { body = (await request.json()) || {}; } catch (e) { body = {}; }
-  const r = await fileRequest(env, code, body);
+  // TODO #51: "files" in the config branch replaces OWNER_FILES / ACCESS_CODES "files" for this person
+  const r = await fileRequest(env, code, body, c && Array.isArray(c.files) ? c.files : null);
   return json(r.body, r.status, origin);
 }
 
@@ -230,7 +254,9 @@ async function artifactRoute(request, env, env0, ctx, registry) {
   const code = request.headers.get("X-Access-Code") || "";
   const person = await identify(env, code);
   if (!person) return worker.fetch(request, env0, ctx); // index.js answers 401 (and rate-limits)
-  const rules = personRules(env, code, person);
+  const cf = await configFor(env, person, origin);
+  if (cf.deny) return cf.deny;
+  const rules = personRules(env, code, person, cf.cfg);
   const pick = pickAgent(registry, allowedAgents(registry, rules), rules, requested);
   if (pick.error) return json({ error: pick.error }, pick.status, origin);
   const a = pick.agent;
@@ -265,7 +291,9 @@ export default {
     const person = await identify(env, code);
     if (!person) return worker.fetch(request, env0, ctx);
 
-    const rules = personRules(env, code, person);
+    const cf = await configFor(env, person, origin);
+    if (cf.deny) return cf.deny;
+    const rules = personRules(env, code, person, cf.cfg);
     const pick = pickAgent(registry, allowedAgents(registry, rules), rules, (request.headers.get("X-Agent") || "").trim());
     if (pick.error) {
       const ip = request.headers.get("CF-Connecting-IP") || "unknown";
@@ -278,7 +306,9 @@ export default {
       const j = await res.json().catch(() => null);
       if (!j) return res;
       j.agent = { id: a.id, name: a.name, initials: a.initials };
-      j.role = personRole(env, code, person); // TODO #7 (advisory, see personRole)
+      j.role = personRole(env, code, person, cf.cfg); // TODO #7 (advisory, see personRole)
+      const h = personHeader(cf.cfg, person); // TODO #51: web/header.js puts it on top of the first / every N-th message
+      if (h) j.header = h;
       return json(j, res.status, origin);
     }
     return res;

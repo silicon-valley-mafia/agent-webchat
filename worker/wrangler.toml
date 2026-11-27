@@ -18,6 +18,9 @@ ARTIFACT_MAX_BYTES = "1073741824" # 1 GiB largest single attachment
 DEFAULT_AGENT_ID = "github"
 DEFAULT_AGENT_NAME = "GitHub Agent"
 DEFAULT_AGENT_INITIALS = "GH"
+# Per-person settings (agents, role, 📄 File folders, session header) from LOG_REPO @ this branch, file
+# config/people.json (TODO #51, docs/CONFIG.md). "off" = everything from the secrets as before.
+CONFIG_BRANCH = "config"
 
 # Secrets - NEVER put them in this file. Set them with:
 #   npx wrangler secret put DIRECTLINE_SECRET

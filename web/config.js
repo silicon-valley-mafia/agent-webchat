@@ -22,6 +22,14 @@ window.AGENT_WEBCHAT_CONFIG = {
   expandedRecentReplies: 3,   // the latest N agent replies are shown in full; older long ones are collapsed
   escapeAngleBrackets: true,  // show "<id>"-style text in replies instead of letting it vanish
 
+  // Agent turns, multiple agents, Stop (each feature lives in its own file; false = old behaviour)
+  multiAgent: true,           // web/agents.js - agent picker when the Worker offers 2+ agents (docs/AGENTS.md)
+  turnHints: true,            // web/turns.js - progress notes don't end "Agent is working" (TODO #42)
+  interimGraceMs: 120000,     // after a progress note, wait this long for the final reply before giving up
+  debugActivities: true,      // web/turns.js - keep activity metadata (no text) for AgentTurn.summary() in DevTools
+  stopButton: true,           // web/stop.js - "⏹ Stop" hides the rest of the current reply (TODO #4)
+  voiceDiagnostics: true,     // web/voice.js - explain why dictation gave no text
+
   // Session panel (ⓘ) links - private repos, links only work for people with access
   logTimeZone: "Asia/Kolkata",
   logRepo: "silicon-valley-mafia/agent-webchat-logs",

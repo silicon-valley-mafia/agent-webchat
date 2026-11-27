@@ -1,8 +1,9 @@
 /**
  * TODO #51: per-person settings from a private config branch (owner decision 2026-11-27 23:50 IST, docs/CONFIG.md).
  *
- * Where: <CONFIG_REPO or LOG_REPO> at branch CONFIG_BRANCH (wrangler.toml: "config"), file CONFIG_PATH
- * (default config/people.json). Read with LOG_REPO_TOKEN; nothing in the Worker ever writes to this branch.
+ * Where: <CONFIG_REPO or LOG_REPO> at branch CONFIG_BRANCH (wrangler.toml: agent-webchat-config @ main), file
+ * CONFIG_PATH (default config/people.json). Read with CONFIG_TOKEN, else AGENT_SYSTEM_PAT (the agent system's PAT,
+ * owner decision 2026-11-28 00:12 IST), else LOG_REPO_TOKEN. Nothing in the Worker ever writes there.
  * Cached per isolate for CONFIG_TTL_SEC (default 60), so an edit takes effect within about a minute, no redeploy.
  *
  * {
@@ -35,9 +36,13 @@ export function _resetConfigCache() {
   cache = { key: "", at: 0, data: null, errAt: 0, err: "" };
 }
 
+export function configToken(env) {
+  return env.CONFIG_TOKEN || env.AGENT_SYSTEM_PAT || env.LOG_REPO_TOKEN || "";
+}
+
 export function configOn(env) {
   const b = String(env.CONFIG_BRANCH || "").trim();
-  return !!(b && b !== "off" && (env.CONFIG_REPO || env.LOG_REPO) && env.LOG_REPO_TOKEN);
+  return !!(b && b !== "off" && (env.CONFIG_REPO || env.LOG_REPO) && configToken(env));
 }
 
 /** Pure: {text, every} or null. A plain string counts as {text}. */
@@ -93,7 +98,7 @@ export async function loadConfig(env, now = Date.now()) {
   try {
     r = await fetch(url, {
       headers: {
-        Authorization: "Bearer " + env.LOG_REPO_TOKEN,
+        Authorization: "Bearer " + configToken(env),
         Accept: "application/vnd.github.raw+json",
         "X-GitHub-Api-Version": "2022-11-28",
         "User-Agent": "agent-webchat-config",

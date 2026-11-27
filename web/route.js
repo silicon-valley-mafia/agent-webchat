@@ -4,6 +4,10 @@
  *     "spark": { ..., "routes": ["coach"] }     (the route id is what the agent receives; label from the agent list)
  * - When on, every message you send in that chat carries channelData.awRoute = "coach" (the agent decides what to do;
  *   SPARK forwards it). The page does not forward anything itself and costs no extra request.
+ * - Fix 2026-11-28 (owner test): a Copilot Studio agent's AI never sees channelData (only a topic reading
+ *   System.Activity.ChannelData can), so SPARK answered "I don't see that tag". The message text now also starts
+ *   with a visible line "[route: coach]" that the agent's instructions can act on. routeMarker in config.js:
+ *   "both" (default: text line + channelData), "text" (same; channelData is always added) or "channelData" (old way).
  * - Remembered per conversation (localStorage agentRoute), so it survives a reload and each chat keeps its own state.
  * - Messages queued while the agent works (#35) keep the state they had when you pressed Enter.
  * Off switch: routeToggle: false in web/config.js. app.js unchanged.
@@ -31,12 +35,14 @@
   };
   api.get = function (conv) { return (conv && api.map()[conv]) || ""; };
   /** Pure: an outgoing message activity with the route added (never overrides one already set). */
-  api.tag = function (activity, route) {
+  api.tag = function (activity, route, mode) {
     if (!route || !activity || activity.type !== "message") return activity;
     if (activity.channelData && activity.channelData.awRoute) return activity;
     var out = {};
     for (var k in activity) out[k] = activity[k];
     out.channelData = Object.assign({}, activity.channelData, { awRoute: route });
+    // mode "both" / "text": a visible first line the agent's AI can read (it never sees channelData)
+    if (mode === "both" || mode === "text") out.text = "[route: " + route + "]" + (activity.text ? "\n" + activity.text : "");
     return out;
   };
   /** Pure: conversation id from a Web Chat store state (first activity that has one). */
@@ -81,7 +87,7 @@
               var s = current();
               var conv = s && s.store && s.store === holder.store ? s.conversationId : api.convOf(storeApi.getState());
               var route = api.get(conv);
-              var a2 = api.tag(action.payload.activity, route);
+              var a2 = api.tag(action.payload.activity, route, cfg.routeMarker || "both");
               if (a2 !== action.payload.activity) action = Object.assign({}, action, { payload: Object.assign({}, action.payload, { activity: a2 }) });
             }
             return next(action);

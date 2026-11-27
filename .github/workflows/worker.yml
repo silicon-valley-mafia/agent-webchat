@@ -22,7 +22,7 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 22
-      - run: node --test test/token.test.js test/log.test.js test/features.test.js test/artifact.test.js test/files.test.js test/ui.test.js test/pages.test.js test/voice.test.js test/agents.test.js test/turns.test.js test/stop.test.js test/group.test.js test/agentlogs.test.js test/rail.test.js test/replies.test.js test/owners.test.js test/role.test.js
+      - run: node --test test/token.test.js test/log.test.js test/features.test.js test/artifact.test.js test/files.test.js test/ui.test.js test/pages.test.js test/voice.test.js test/agents.test.js test/turns.test.js test/stop.test.js test/group.test.js test/agentlogs.test.js test/rail.test.js test/replies.test.js test/owners.test.js test/role.test.js test/preflight.test.js
 
   deploy:
     needs: test

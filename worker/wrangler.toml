@@ -1,0 +1,34 @@
+name = "agent-webchat-token"
+main = "src/main.js"               # multi-agent front (TODO #20); wraps src/index.js
+compatibility_date = "2025-01-01"
+
+[vars]
+ALLOWED_ORIGINS = "https://silicon-valley-mafia.github.io"
+DIRECTLINE_DOMAIN = "https://directline.botframework.com"
+RATE_LIMIT_PER_MIN = "10"        # /token and /resume, per IP
+API_RATE_LIMIT_PER_MIN = "60"    # /log /export /history /transcript /agents, per IP
+LOG_REPO = "silicon-valley-mafia/agent-webchat-logs"
+LOG_BRANCH = "main"
+LOG_TZ_OFFSET_MIN = "330"        # transcripts use IST (UTC+05:30)
+OWNER_NAME = "Deepesh"           # name recorded for ACCESS_CODE (admin)
+ARTIFACT_REPO = "silicon-valley-mafia/agent-webchat-artifcats-1"   # every attached file is committed here
+ARTIFACT_PART_BYTES = "73400320" # 70 MiB per committed part (Cloudflare 100 MB body cap after base64)
+ARTIFACT_MAX_BYTES = "1073741824" # 1 GiB largest single attachment
+# The agent behind DIRECTLINE_SECRET (TODO #20). More agents: AGENTS secret, see docs/AGENTS.md.
+DEFAULT_AGENT_ID = "github"
+DEFAULT_AGENT_NAME = "GitHub Agent"
+DEFAULT_AGENT_INITIALS = "GH"
+# Per-person settings (agents, role, 📄 File folders, session header) from CONFIG_REPO @ CONFIG_BRANCH, file
+# config/people.json (TODO #51, docs/CONFIG.md), read with the AGENT_SYSTEM_PAT secret. "off" = secrets only, as before.
+CONFIG_REPO = "silicon-valley-mafia/agent-webchat-config"
+CONFIG_BRANCH = "main"
+
+# Secrets - NEVER put them in this file. Set them with:
+#   npx wrangler secret put DIRECTLINE_SECRET
+#   npx wrangler secret put ACCESS_CODE        (owner, admin)
+#   npx wrangler secret put ACCESS_CODES       (optional JSON: {"code":"Name"} or {"code":{"name":"Name","admin":true}}
+#                                               or {"code":{"name":"Name","agents":["coach"],"defaultAgent":"coach"}})
+#   npx wrangler secret put AGENTS             (optional JSON: {"coach":{"name":"VLSI Coach","initials":"VC","secret":"<Direct Line secret>"}})
+#   npx wrangler secret put LOG_REPO_TOKEN   (optional - enables transcript logging + history, and attachments)
+#   npx wrangler secret put ARTIFACT_REPO_TOKEN (optional - separate token for ARTIFACT_REPO)
+#   npx wrangler secret put AGENT_SYSTEM_PAT  (optional - reads CONFIG_REPO and the 📄 File folders; GET only)

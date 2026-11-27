@@ -1,0 +1,131 @@
+:root {
+  --bg: #f3f4f6; --panel: #ffffff; --text: #111827; --muted: #6b7280; --border: #e5e7eb;
+  --header: #24292f; --header-text: #ffffff; --error: #b91c1c; --code: #f3f4f6;
+  --link: #1d4ed8; --link-visited: #6d28d9; --chip: #eef2ff;
+}
+[data-theme="dark"] {
+  --bg: #020617; --panel: #0f172a; --text: #e5e7eb; --muted: #9ca3af; --border: #334155;
+  --header: #111827; --header-text: #e5e7eb; --error: #f87171; --code: #1e293b;
+  --link: #93c5fd; --link-visited: #c4b5fd; --chip: #1e293b;
+}
+html, body { height: 100%; margin: 0; font-family: system-ui, sans-serif; background: var(--bg); color: var(--text); }
+/* TODO #15: fluid by default; the ↔ button switches to a centred narrow column */
+#app { display: flex; flex-direction: column; height: 100%; max-width: none; margin: 0 auto; background: var(--panel); box-shadow: 0 0 12px rgba(0,0,0,.12); position: relative; }
+[data-width="narrow"] #app { max-width: 960px; }
+header { padding: 8px 12px; background: var(--header); color: var(--header-text); display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: 6px; }
+header h1 { font-size: 16px; margin: 0; }
+header .left { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; }
+#who { font-size: 12px; color: #9ca3af; }
+#workstate { font-size: 12px; color: #fde68a; font-variant-numeric: tabular-nums; }
+header .right { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+header button { background: transparent; color: var(--header-text); border: 1px solid #6b7280; border-radius: 6px; padding: 4px 9px; cursor: pointer; font-size: 13px; }
+header button:hover { border-color: #d1d5db; }
+header button:disabled { opacity: .5; cursor: default; }
+#logstate { font-size: 12px; color: #9ca3af; min-width: 56px; text-align: right; }
+#upstate { font-size: 12px; color: #9ca3af; max-width: 260px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+#dropzone { position: absolute; inset: 0; z-index: 20; background: rgba(37, 99, 235, .12); border: 3px dashed #2563eb; display: flex; align-items: center; justify-content: center; pointer-events: none; }
+#dropzone div { background: var(--panel); color: var(--text); padding: 14px 20px; border-radius: 10px; font-size: 16px; box-shadow: 0 2px 12px rgba(0,0,0,.2); }
+#notice { background: #fef3c7; color: #92400e; padding: 6px 12px; font-size: 13px; display: flex; align-items: center; gap: 8px; }
+#notice #noticetext { flex: 1; }
+#notice button { background: transparent; color: inherit; border: 1px solid currentColor; border-radius: 6px; padding: 1px 8px; cursor: pointer; font-size: 12px; }
+[data-theme="dark"] #notice { background: #422006; color: #fde68a; }
+#gate { margin: auto; padding: 24px; text-align: center; }
+#gate input { padding: 8px; font-size: 15px; width: 220px; background: var(--panel); color: var(--text); border: 1px solid var(--border); border-radius: 6px; }
+#gate button { padding: 8px 14px; font-size: 15px; margin-left: 6px; cursor: pointer; }
+#status { color: var(--error); min-height: 1.2em; margin-top: 10px; font-size: 14px; }
+#chatwrap { flex: 1; min-height: 0; }
+#chatwrap > div { height: 100%; }
+[hidden] { display: none !important; }
+
+/* TODO #10: staged attachments wait here until the message is sent */
+#staged { border-top: 1px solid var(--border); padding: 6px 10px; background: var(--panel); max-height: 30vh; overflow: auto; }
+#staged .chips { display: flex; flex-wrap: wrap; gap: 6px; }
+#staged .chip { display: flex; align-items: center; gap: 6px; background: var(--chip); border: 1px solid var(--border); border-radius: 8px; padding: 3px 4px 3px 6px; font-size: 13px; max-width: 100%; }
+#staged .chip.warn { border-color: #f59e0b; }
+#staged .chip img { width: 32px; height: 32px; object-fit: cover; border-radius: 4px; }
+#staged .chip span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 320px; }
+#staged .bar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-top: 6px; font-size: 13px; }
+#staged button { background: transparent; color: var(--text); border: 1px solid var(--border); border-radius: 6px; padding: 2px 9px; cursor: pointer; }
+#staged button.primary { background: #2563eb; color: #fff; border-color: #2563eb; }
+#staged button.x { border: 0; padding: 0 4px; }
+
+/* TODO #35: messages typed while the agent is still answering wait here, then go out one at a time */
+#queued { border-top: 1px solid var(--border); padding: 6px 10px; background: var(--panel); max-height: 25vh; overflow: auto; font-size: 13px; }
+#queued .bar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-bottom: 6px; }
+#queued .chips { display: flex; flex-direction: column; gap: 4px; }
+#queued .chip { display: flex; align-items: center; gap: 6px; background: var(--chip); border: 1px dashed var(--border); border-radius: 8px; padding: 3px 4px 3px 8px; }
+#queued .chip span { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+#queued button { background: transparent; color: var(--text); border: 1px solid var(--border); border-radius: 6px; padding: 2px 9px; cursor: pointer; }
+#queued button.primary { background: #2563eb; color: #fff; border-color: #2563eb; }
+#queued button.x { border: 0; padding: 0 4px; }
+
+/* TODO #14: readable links in bubbles (dark theme especially) */
+#chatwrap .webchat__bubble:not(.webchat__bubble--from-user) a { color: var(--link); }
+#chatwrap .webchat__bubble:not(.webchat__bubble--from-user) a:visited { color: var(--link-visited); }
+#chatwrap .webchat__bubble:not(.webchat__bubble--from-user) a:hover { text-decoration-thickness: 2px; }
+#chatwrap .webchat__bubble--from-user a, #chatwrap .webchat__bubble--from-user a:visited { color: #ffffff; text-decoration: underline; }
+
+/* TODO #24(b): tables in replies scroll sideways instead of squeezing letters into columns */
+#chatwrap .webchat__bubble table { display: block; max-width: 100%; overflow-x: auto; border-collapse: collapse; }
+#chatwrap .webchat__bubble th, #chatwrap .webchat__bubble td { min-width: 6ch; word-break: normal; overflow-wrap: normal; padding: 2px 6px; border: 1px solid var(--border); vertical-align: top; }
+#chatwrap .webchat__bubble th { white-space: nowrap; }
+#chatwrap .webchat__bubble pre { max-width: 100%; overflow-x: auto; }
+
+/* TODO #17 / #19: per-reply tools and collapsing */
+#chatwrap .aw-tools { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; padding: 2px 8px 4px; font-size: 12px; opacity: .55; transition: opacity .15s; }
+#chatwrap .webchat__bubble:hover .aw-tools, #chatwrap .aw-tools:focus-within { opacity: 1; }
+@media (hover: none) { #chatwrap .aw-tools { opacity: 1; } }
+#chatwrap .aw-tools button { background: transparent; color: var(--muted); border: 1px solid var(--border); border-radius: 5px; padding: 0 6px; font-size: 12px; cursor: pointer; line-height: 18px; }
+#chatwrap .aw-tools button:hover { color: var(--text); }
+#chatwrap .aw-stub { color: var(--muted); font-style: italic; }
+#chatwrap .aw-stub:empty { display: none; }
+#chatwrap .aw-collapsed { max-height: var(--aw-preview, 140px); overflow: hidden; -webkit-mask-image: linear-gradient(to bottom, #000 65%, transparent); mask-image: linear-gradient(to bottom, #000 65%, transparent); }
+#chatwrap .aw-hidden { display: none !important; }
+
+#history { position: absolute; inset: 0; background: var(--panel); display: flex; flex-direction: column; z-index: 10; }
+#history .head { display: flex; justify-content: space-between; align-items: center; padding: 10px 14px; border-bottom: 1px solid var(--border); }
+#history .head h2 { font-size: 16px; margin: 0; }
+#history button { background: transparent; color: var(--text); border: 1px solid var(--border); border-radius: 6px; padding: 4px 10px; cursor: pointer; }
+#history button.primary { background: #2563eb; color: #fff; border-color: #2563eb; }
+#history button.small { padding: 0 6px; font-size: 12px; }
+#history a { color: var(--link); }
+#historybody { overflow: auto; padding: 8px 14px 24px; flex: 1; }
+#historybody h3 { font-size: 13px; color: var(--muted); margin: 16px 0 6px; }
+#historybody .row { display: flex; align-items: center; gap: 8px; padding: 6px 0; border-bottom: 1px solid var(--border); }
+#historybody .row span { flex: 1; font-variant-numeric: tabular-nums; }
+#historybody .bar { display: flex; gap: 8px; flex-wrap: wrap; margin: 6px 0 12px; }
+.muted { color: var(--muted); }
+.error { color: var(--error); }
+.transcript { line-height: 1.5; }
+.transcript h2 { font-size: 18px; }
+.transcript h4 { margin: 14px 0 4px; font-size: 14px; }
+.transcript p { margin: 4px 0; white-space: pre-wrap; word-wrap: break-word; }
+.transcript pre { background: var(--code); padding: 8px; border-radius: 6px; overflow: auto; font-size: 12px; }
+.transcript code { background: var(--code); padding: 0 4px; border-radius: 4px; word-break: break-all; }
+.transcript .kv { font-size: 13px; padding: 2px 0; }
+.transcript .kv span { color: var(--muted); display: inline-block; min-width: 130px; }
+.transcript blockquote { margin: 4px 0; padding-left: 8px; border-left: 3px solid var(--border); color: var(--muted); }
+
+/* TODO #26: skins (🎨). Web Chat's own colours come from SKINS in app.js; these rules cover the page around it. */
+/* Focus: one centered reading column, replies without bubbles */
+[data-skin="focus"] #chatwrap > div { max-width: 860px; margin: 0 auto; }
+[data-skin="focus"] #staged, [data-skin="focus"] #queued { max-width: 860px; width: 100%; margin: 0 auto; box-sizing: border-box; border-radius: 12px 12px 0 0; }
+[data-skin="focus"] #chatwrap .webchat__bubble:not(.webchat__bubble--from-user) { line-height: 1.6; }
+/* High contrast: WCAG AAA colours, bigger text, strong focus rings, tools always visible */
+[data-skin="contrast"] {
+  --bg: #ffffff; --panel: #ffffff; --text: #000000; --muted: #1f2937; --border: #000000;
+  --header: #000000; --header-text: #ffffff; --error: #b00020; --code: #f0f0f0;
+  --link: #0000ee; --link-visited: #551a8b; --chip: #ffffff;
+}
+[data-skin="contrast"][data-theme="dark"] {
+  --bg: #000000; --panel: #000000; --text: #ffffff; --muted: #e5e7eb; --border: #ffffff;
+  --header: #000000; --header-text: #ffffff; --error: #ff6b6b; --code: #1a1a1a;
+  --link: #ffff00; --link-visited: #ffb3ff; --chip: #000000;
+}
+[data-skin="contrast"] body { font-size: 17px; }
+[data-skin="contrast"] :focus-visible { outline: 3px solid #ff8c00 !important; outline-offset: 2px; }
+[data-skin="contrast"] header button, [data-skin="contrast"] #staged button, [data-skin="contrast"] #queued button, [data-skin="contrast"] #history button { border-width: 2px; border-color: currentColor; }
+[data-skin="contrast"] #who, [data-skin="contrast"] #logstate, [data-skin="contrast"] #upstate { color: var(--header-text); }
+[data-skin="contrast"] #chatwrap .aw-tools { opacity: 1; }
+[data-skin="contrast"] #chatwrap .aw-tools button { color: var(--text); border-color: var(--text); }
+[data-skin="contrast"] #notice { background: #ffff00; color: #000000; }

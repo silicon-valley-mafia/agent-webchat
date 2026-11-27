@@ -5,7 +5,7 @@ on:
     branches: [main]
     paths: ["worker/**", ".github/workflows/worker.yml"]
   pull_request:
-    paths: ["worker/**", "web/files.js", "web/ui.js", "web/voice.js", "web/agents.js", "web/turns.js", "web/stop.js", "web/group.js", "web/rail.js", "web/timestamps.js", "web/replies.js", "web/role.js", "web/insert.js", "web/route.js", "web/header.js", "web/copyprompt.js", ".github/workflows/worker.yml"]
+    paths: ["worker/**", "web/files.js", "web/ui.js", "web/voice.js", "web/agents.js", "web/turns.js", "web/stop.js", "web/group.js", "web/rail.js", "web/timestamps.js", "web/replies.js", "web/role.js", "web/insert.js", "web/route.js", "web/header.js", "web/copyprompt.js", "web/starters.js", "web/planboard.js", "web/historyfilter.js", ".github/workflows/worker.yml"]
   workflow_dispatch:
 
 permissions:
@@ -28,6 +28,9 @@ jobs:
     needs: test
     if: github.event_name != 'pull_request'
     runs-on: ubuntu-latest
+    # Secrets live in this environment (Settings > Environments), which only the main branch may use, so workflows on
+    # other branches cannot read them. Without this line the job would only see repository secrets.
+    environment: agent-webchat-cloudflare-worker
     env:
       CF_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
       HAS_LOG_TOKEN: ${{ secrets.LOG_REPO_TOKEN != '' }}
@@ -57,7 +60,7 @@ jobs:
         env:
           DIRECTLINE_SECRET: ${{ secrets.DIRECTLINE_SECRET }}
           ACCESS_CODE: ${{ secrets.ACCESS_CODE }}
-      # Optional secrets: only uploaded when the matching repo secret exists.
+      # Optional secrets: only uploaded when the matching environment secret exists.
       - name: Set transcript logging token
         if: env.CF_TOKEN != '' && env.HAS_LOG_TOKEN == 'true'
         working-directory: worker

@@ -23,8 +23,10 @@
  *   agent settings ("agents", with "secretName" pointing at a Worker secret or a key of AGENT_SECRETS), people with a
  *   hashed access code ("codeHash"), and "repos" {logs, artifacts} for where NEW logs / uploads are written.
  *   /token and /resume add {repos}; GET /health adds {config: "off"|"on"|"stale"|"error"}.
+ *   #52 part 2: "repos.oldLogs" = older logs repos that History, transcripts and the #49 owner check also read;
+ *   GET /health?repos=1 adds {repos: {logs, artifacts, oldLogs: [...]}} = can the tokens read them (true/false only).
  */
-import worker, { identify, rateLimited, json, people, slugify } from "./index.js";
+import worker, { identify, rateLimited, json, people, slugify, oldLogRepos } from "./index.js";
 import { fileRequest } from "./repofile.js";
 import { loadConfig, configEntry, personHeader, SECRET_NAME_RE } from "./config.js";
 
@@ -168,6 +170,7 @@ export async function configEnv(env, cfg, code) {
   }
   if (d.repos && d.repos.logs) out.LOG_REPO = d.repos.logs;
   if (d.repos && d.repos.artifacts) out.ARTIFACT_REPO = d.repos.artifacts;
+  if (d.repos && d.repos.oldLogs) out.LOG_REPOS_OLD = d.repos.oldLogs.join(","); // #52 part 2: read only
   const hashed = Object.entries(d.people).filter(([, e]) => e.codeHash);
   if (code && hashed.length && env.OWNER_PEPPER && !(await identify(env, code))) {
     const h = await hmacHex(env.OWNER_PEPPER, code);
@@ -334,6 +337,37 @@ async function artifactRoute(request, env, env0, ctx, registry) {
   return worker.fetch(request, { ...env0, LOG_AGENT_NUM: String(a.num), LOG_AGENT_ID: a.id, LOG_AGENT_NAME: a.name }, ctx);
 }
 
+/**
+ * TODO #52 part 2: GET /health?repos=1 -> can the Worker's tokens read each configured repo? true / false / null (no
+ * repo or no token) only, never names. Cached 5 minutes per isolate, so /health can't be used to burn GitHub quota.
+ * A read check only: a token that can read but not write shows up as logging errors (see docs/PORTABLE-REPOS.md).
+ */
+let repoCheckCache = null;
+export function _resetRepoCheck() {
+  repoCheckCache = null;
+}
+export async function repoCheck(env, now = Date.now()) {
+  if (repoCheckCache && now - repoCheckCache.at < 300000) return repoCheckCache.v;
+  const can = async (repo, token) => {
+    if (!repo || !token) return null;
+    try {
+      const r = await fetch("https://api.github.com/repos/" + repo, {
+        headers: { Authorization: "Bearer " + token, Accept: "application/vnd.github+json", "X-GitHub-Api-Version": "2022-11-28", "User-Agent": "agent-webchat-logger" },
+      });
+      return r.ok;
+    } catch (e) {
+      return false;
+    }
+  };
+  const v = {
+    logs: await can(env.LOG_REPO, env.LOG_REPO_TOKEN),
+    artifacts: await can(env.ARTIFACT_REPO, env.ARTIFACT_REPO_TOKEN || env.LOG_REPO_TOKEN),
+    oldLogs: await Promise.all(oldLogRepos(env).map((r) => can(r, env.LOG_REPO_TOKEN))),
+  };
+  repoCheckCache = { at: now, v };
+  return v;
+}
+
 export default {
   async fetch(request, rawEnv, ctx) {
     const url = new URL(request.url);
@@ -355,6 +389,7 @@ export default {
       j.agents = registry.length;
       // TODO #52 / #53: is the config repo in use, and is it readable? (no names, no contents)
       j.config = !cfg0 || cfg0.off ? "off" : cfg0.error ? "error" : cfg0.stale ? "stale" : "on";
+      if (url.searchParams.get("repos") === "1") j.repos = await repoCheck(env); // TODO #52 part 2
       return new Response(JSON.stringify(j), { status: res.status, headers: res.headers });
     }
     if (ART_ROUTES.has(url.pathname)) return artifactRoute(request, env, env0, ctx, registry);

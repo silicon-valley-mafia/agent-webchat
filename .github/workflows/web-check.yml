@@ -21,10 +21,11 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 22
-      - name: node --check web/*.js
+      - name: node --check web/*.js (and preview folders web/*/*.js)
         run: |
           set -e
-          for f in web/*.js; do
+          shopt -s nullglob
+          for f in web/*.js web/*/*.js; do
             echo "checking $f"
             node --check "$f"
           done

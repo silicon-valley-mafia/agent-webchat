@@ -13,7 +13,8 @@
  *   POST /agents  -> {agents:[{id,name,description,initials}], default, person}  (only agents this code may use)
  *   /token /resume /log /export take an optional X-Agent header; the Worker picks that agent's Direct Line secret.
  *   No header = the person's default agent (old cached pages keep working). Not allowed -> 403 agent_not_allowed.
- *   /token and /resume answers gain {agent:{id,name,initials}}. Secrets never leave the Worker.
+ *   /token and /resume answers gain {agent:{id,name,initials}, role}. Secrets never leave the Worker.
+ *   role (TODO #7) = "owner" | "admin" | "user" | "readOnly" (ACCESS_CODES "role"); advisory, see personRole().
  * Transcripts (TODO #44): each agent logs into its own numbered folder logs/<num>/ (default agent = 1, AGENTS
  *   entries "num": 2, 3, ...); index.js writes logs/<num>/AGENT.md once to say which agent a number is.
  */
@@ -99,6 +100,22 @@ export function personRules(env, code, person) {
     agents: list && list.indexOf("*") < 0 ? list : null,
     defaultAgent: typeof v.defaultAgent === "string" ? v.defaultAgent : null,
   };
+}
+
+/**
+ * TODO #7: the role the page passes to the agent in the startConversation event. ADVISORY ONLY: the agent can't
+ * verify it; access control is the Worker's per-code agent list (and the #49 ownership check).
+ * ACCESS_CODE = "owner"; ACCESS_CODES entry "role": "owner" | "admin" | "user" | "readOnly"; "owner"/"admin" are only
+ * reported for codes that really are admins ("admin": true); otherwise admin codes = "admin", everyone else "user".
+ */
+export const ROLES = ["owner", "admin", "user", "readOnly"];
+export function personRole(env, code, person) {
+  if (env.ACCESS_CODE && code === env.ACCESS_CODE) return "owner";
+  const v = (parseJson(env.ACCESS_CODES) || {})[code];
+  const r = v && typeof v === "object" && ROLES.indexOf(v.role) >= 0 ? v.role : "";
+  const admin = !!(person && person.admin);
+  if (r === "owner" || r === "admin") return admin ? r : "user";
+  return r || (admin ? "admin" : "user");
 }
 
 export function allowedAgents(registry, rules) {
@@ -192,6 +209,7 @@ export default {
       const j = await res.json().catch(() => null);
       if (!j) return res;
       j.agent = { id: a.id, name: a.name, initials: a.initials };
+      j.role = personRole(env, code, person); // TODO #7 (advisory, see personRole)
       return json(j, res.status, origin);
     }
     return res;

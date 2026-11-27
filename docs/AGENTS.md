@@ -28,13 +28,13 @@ Worker. Each person (access code) can be limited to some agents.
 
 ## 2. Decide who sees which agent
 
-`ACCESS_CODES` (repo secret) accepts two optional keys per person:
+`ACCESS_CODES` (repo secret) accepts these optional keys per person:
 
 ```json
 {
   "ravi-123": { "name": "Ravi", "agents": ["coach"], "defaultAgent": "coach" },
   "asha-456": "Asha",
-  "team-789": { "name": "Team", "agents": ["github", "coach"] }
+  "team-789": { "name": "Team", "agents": ["github", "coach"], "role": "readOnly" }
 }
 ```
 
@@ -44,13 +44,16 @@ Worker. Each person (access code) can be limited to some agents.
 | Plain name (`"Asha"`) or no `agents` key | all |
 | `"agents": ["coach"]` | only those listed; `"*"` = all |
 | `"defaultAgent"` | picked for that person's first new chat |
+| `"role"` | label sent to the agent, see section 5 (does not grant or remove access) |
 
 The Worker enforces this: a code can't get a token for an agent it isn't allowed, even by editing the request
-(`403 agent_not_allowed`).
+(`403 agent_not_allowed`). Conversations also belong to the code that started them ([OWNERSHIP.md](OWNERSHIP.md), #49).
 
 ## 3. Using it
 
 - With 2+ agents allowed, a **picker** appears next to the title. Choosing an agent starts a **new chat** with it.
+- The **☰ Chats** sidebar keeps several chats (any agent) open in one tab and switches between them without
+  reconnecting ([SESSIONS.md](SESSIONS.md), #23).
 - Earlier chats with other agents stay in **History** and the recent-sessions list. Opening one reconnects to the
   agent it was started with. The page remembers which agent each conversation belongs to.
 - Title, tab title and the agent's avatar initials follow the open conversation's agent.
@@ -85,12 +88,38 @@ Where the number is written down, so a folder is never ambiguous:
 History, transcripts and Download read both the old flat folders and the numbered ones. History items from numbered
 folders carry `agent: <N>`. Download file names start with the number (`2_2026-11-27_...md`).
 
+## 5. Role sent to the agent (TODO #7)
+
+When a new chat starts, the page sends Copilot Studio a `startConversation` event. It now carries the access code's
+role, decided by the Worker (never by the page):
+
+| Role | Who |
+|---|---|
+| `owner` | `ACCESS_CODE`, or `"role": "owner"` on an `"admin": true` code |
+| `admin` | `"admin": true` codes |
+| `user` | everyone else (default) |
+| `readOnly` | `"role": "readOnly"` in `ACCESS_CODES` |
+
+`"role": "owner"` / `"admin"` on a code **without** `"admin": true` is reported as `user`.
+
+In Copilot Studio read it in the **Conversation Start** topic: `System.Activity.ChannelData.awRole`
+(also `System.Activity.Value.role`). Example: if it is `readOnly`, tell the agent not to offer GitHub writes.
+
+> **The role is advisory.** The agent cannot verify it: anyone with a valid Direct Line token can send events, and
+> the page could be modified. **The access control is the Worker's per-code agent list** (section 2, enforced on
+> every `/token`, `/resume`, `/log`, `/export`) plus the conversation ownership check (#49). Use the role for wording
+> and defaults, never as the only thing that stops a write.
+
+Notes: sent only when a chat **starts** (a resumed chat already had it); the 🧪 Group page doesn't send it yet.
+Off switch: `sendRole: false` in `web/config.js`. Code: `web/role.js`, `personRole()` in `worker/src/main.js`,
+tests in `worker/test/role.test.js`.
+
 ## Limits / notes
 
-- One agent per conversation. Switching agent = new chat (keeping several live chats in one tab is #23).
+- One agent per conversation. Switching agent in the picker = new chat; use the ☰ Chats sidebar to go back (#23).
 - A conversation started in another browser and never opened here has no agent record. It goes to the first agent
   (the GitHub agent, which every older conversation used).
 - Off switch on the page: `multiAgent: false` in `web/config.js`. Worker: set `main = "src/index.js"` in `wrangler.toml`
   (logs then go to the old flat `logs/<day>/` folders again).
-- Code: `worker/src/main.js` (Worker front: registry, numbers), `worker/src/index.js` (logging), `web/agents.js`
-  (page; `app.js` unchanged), tests in `worker/test/agents.test.js` and `worker/test/agentlogs.test.js`.
+- Code: `worker/src/main.js` (Worker front: registry, numbers, role), `worker/src/index.js` (logging), `web/agents.js`
+  (page; `app.js` unchanged), tests in `worker/test/agents.test.js`, `worker/test/agentlogs.test.js`, `worker/test/role.test.js`.

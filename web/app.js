@@ -525,16 +525,19 @@
   }
   // P7: Copilot Studio often answers one turn with several messages (typing -> message -> typing -> message).
   // Keep "working" until the agent has been quiet for a moment instead of clearing on the first message.
-  var REPLY_QUIET_MS = 3000, TYPING_GRACE_MS = 20000;
-  function agentMessage(s) {
+  var REPLY_QUIET_MS = 3000, TYPING_GRACE_MS = 20000, INTERIM_GRACE_MS = cfg.interimGraceMs || 120000;
+  // TODO #42 (web/turns.js): a progress note ("interim") keeps the turn open; the final reply closes it after the quiet time.
+  function turnKind(s, a) { return window.AgentTurn ? window.AgentTurn.kind(a, s) : "unknown"; }
+  function agentMessage(s, kind) {
     if (!s.pendingSince) return;
+    s.lastKind = kind;
     clearTimeout(s.replyTimer);
-    s.replyTimer = setTimeout(function () { markReplied(s); }, REPLY_QUIET_MS);
+    s.replyTimer = setTimeout(function () { markReplied(s); }, kind === "interim" ? INTERIM_GRACE_MS : REPLY_QUIET_MS);
   }
   function agentTyping(s) {
     if (!s.pendingSince || !s.replyTimer) return; // only after a first reply of this turn
     clearTimeout(s.replyTimer);
-    s.replyTimer = setTimeout(function () { markReplied(s); }, TYPING_GRACE_MS);
+    s.replyTimer = setTimeout(function () { markReplied(s); }, s.lastKind === "interim" ? INTERIM_GRACE_MS : TYPING_GRACE_MS);
   }
 
   // ---------------- store middleware ----------------
@@ -927,7 +930,7 @@
         if (!old) scheduleLog(s);
         rememberSession(s);
         var isMine = mine(s, a);
-        if (!isMine && !old) { maybeNotify(s, a); agentMessage(s); }
+        if (!isMine && !old) { var kind = turnKind(s, a); if (kind !== "interim") maybeNotify(s, a); agentMessage(s, kind); }
         scheduleDecorate(s);
       }
     }));

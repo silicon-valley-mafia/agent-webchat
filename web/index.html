@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="en" data-theme="light">
+<html lang="en" data-theme="light" data-width="wide">
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
@@ -15,19 +15,24 @@
       <div class="left">
         <h1 id="title">Agent</h1>
         <span id="who"></span>
+        <span id="workstate" hidden aria-live="polite"></span>
       </div>
       <div class="right">
         <span id="upstate" title="Attached files being saved to GitHub"></span>
         <span id="logstate" title="Transcript logging status"></span>
+        <button id="expandall" type="button" hidden title="Expand or collapse all long replies">Expand all</button>
         <button id="historybtn" type="button" hidden title="Saved conversations">History</button>
-        <button id="newchat" type="button" hidden>New chat</button>
+        <button id="newchat" type="button" hidden title="Start a fresh conversation">New chat</button>
+        <button id="clearchat" type="button" hidden title="Clear the screen only - same session, the agent still remembers it">Clear</button>
+        <button id="sessionbtn" type="button" hidden title="Show this session's id" aria-label="Session info">ⓘ Session</button>
         <button id="download" type="button" hidden title="Download this conversation as Markdown">⬇ Download</button>
+        <button id="widthbtn" type="button" title="Width" aria-label="Toggle wide / narrow layout">↔</button>
         <button id="theme" type="button" title="Theme">🌓</button>
         <button id="notify" type="button" hidden title="Notifications">🔕</button>
         <button id="forget" type="button" hidden title="Remove the saved access code from this browser">Forget code</button>
       </div>
     </header>
-    <div id="notice" hidden></div>
+    <div id="notice" hidden role="status"><span id="noticetext"></span><button id="noticeclose" type="button" title="Dismiss" aria-label="Dismiss">✕</button></div>
     <form id="gate">
       <p>Enter your access code to start a conversation.<br /><small>It is remembered in this browser, so you only type it once.</small></p>
       <input id="code" type="password" autocomplete="current-password" placeholder="Access code" required />
@@ -35,7 +40,8 @@
       <div id="status"></div>
     </form>
     <div id="chatwrap" hidden></div>
-    <div id="dropzone" hidden><div>Drop files to send them to the agent</div></div>
+    <div id="staged" hidden aria-label="Attached files waiting to be sent"></div>
+    <div id="dropzone" hidden><div>Drop files to attach them to your next message</div></div>
     <section id="history" hidden>
       <div class="head">
         <h2 id="historytitle">Conversation history</h2>
@@ -45,6 +51,7 @@
     </section>
   </div>
   <script src="files.js"></script>
+  <script src="ui.js"></script>
   <script src="app.js"></script>
 </body>
 </html>

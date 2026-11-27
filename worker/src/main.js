@@ -19,10 +19,14 @@
  *   entries "num": 2, 3, ...); index.js writes logs/<num>/AGENT.md once to say which agent a number is.
  * Config branch (TODO #51, src/config.js): per-person agents / defaultAgent / role / files / session header can come
  *   from a private branch (CONFIG_BRANCH); a key set there wins over ACCESS_CODES. /token and /resume add {header}.
+ * Wider config (TODO #53) and switchable repos (TODO #52), see configEnv(): the config repo may also hold non-secret
+ *   agent settings ("agents", with "secretName" pointing at a Worker secret or a key of AGENT_SECRETS), people with a
+ *   hashed access code ("codeHash"), and "repos" {logs, artifacts} for where NEW logs / uploads are written.
+ *   /token and /resume add {repos}; GET /health adds {config: "off"|"on"|"stale"|"error"}.
  */
-import worker, { identify, rateLimited, json } from "./index.js";
+import worker, { identify, rateLimited, json, people, slugify } from "./index.js";
 import { fileRequest } from "./repofile.js";
-import { loadConfig, configEntry, personHeader } from "./config.js";
+import { loadConfig, configEntry, personHeader, SECRET_NAME_RE } from "./config.js";
 
 export const AGENT_ID_RE = /^[a-z0-9][a-z0-9_-]{0,31}$/;
 const DL_ROUTES = new Set(["/token", "/resume", "/log", "/export"]);
@@ -35,6 +39,17 @@ function parseJson(s) {
   } catch (e) {
     return null;
   }
+}
+
+/**
+ * TODO #53: the value of a named secret: a Worker secret of that name, else that key of the AGENT_SECRETS secret
+ * (one JSON secret {"DL_SPARK": "...", ...}, so new agents need no new workflow step). "" if missing.
+ */
+export function secretValue(env, name) {
+  if (typeof name !== "string" || !SECRET_NAME_RE.test(name)) return "";
+  if (typeof env[name] === "string" && env[name]) return env[name];
+  const bag = parseJson(env.AGENT_SECRETS) || {};
+  return typeof bag[name] === "string" ? bag[name] : "";
 }
 
 /** Valid log folder number (1-999) or null. */
@@ -65,7 +80,7 @@ export function agentRegistry(env) {
   }
   for (const [id, v] of Object.entries(extra)) {
     if (!AGENT_ID_RE.test(id) || !v || typeof v !== "object") continue;
-    const secret = typeof v.secret === "string" && v.secret ? v.secret : typeof v.secretName === "string" ? env[v.secretName] : "";
+    const secret = typeof v.secret === "string" && v.secret ? v.secret : typeof v.secretName === "string" ? secretValue(env, v.secretName) : "";
     if (!secret || typeof secret !== "string") continue;
     const a = {
       id,
@@ -114,9 +129,65 @@ export function personRules(env, code, person, cfg) {
   };
 }
 
+function hex(buf) {
+  return [...new Uint8Array(buf)].map((b) => b.toString(16).padStart(2, "0")).join("");
+}
+/** HMAC-SHA-256(key, msg) as lower-case hex - the "codeHash" format of the config repo (TODO #53). */
+export async function hmacHex(key, msg) {
+  const k = await crypto.subtle.importKey("raw", new TextEncoder().encode(String(key)), { name: "HMAC", hash: "SHA-256" }, false, ["sign"]);
+  return hex(await crypto.subtle.sign("HMAC", k, new TextEncoder().encode(String(msg))));
+}
+function sameText(a, b) {
+  let d = a.length ^ b.length;
+  for (let i = 0; i < Math.max(a.length, b.length); i++) d |= (a.charCodeAt(i) || 0) ^ (b.charCodeAt(i) || 0);
+  return d === 0;
+}
+
+/**
+ * TODO #52 / #53: this request's environment with the config repo applied. index.js is unchanged; it simply sees:
+ *   AGENTS        - config "agents" merged over the AGENTS secret (config wins for name/num/routes/secretName;
+ *                   a secret value can only come from a Worker secret or AGENT_SECRETS)
+ *   LOG_REPO / ARTIFACT_REPO - config "repos" (where NEW logs and uploads go)
+ *   ACCESS_CODES  - plus this request's code when it matches a config "codeHash" (HMAC with OWNER_PEPPER). Such a
+ *                   person is never admin, gets only the agents the config lists for them, and can't use the
+ *                   name (slug) of anyone defined in the secrets.
+ * The config itself rides along as __awConfig so every handler uses the same copy.
+ */
+export async function configEnv(env, cfg, code) {
+  const d = cfg && cfg.data;
+  if (!d) return { ...env, __awConfig: cfg };
+  const out = { ...env, __awConfig: cfg };
+  if (d.agents) {
+    const base = parseJson(env.AGENTS) || {};
+    for (const [id, c] of Object.entries(d.agents)) {
+      const m = { ...(base[id] || {}), ...c };
+      if (c.secretName) delete m.secret; // the config chose which secret: use exactly that one
+      base[id] = m;
+    }
+    out.AGENTS = JSON.stringify(base);
+  }
+  if (d.repos && d.repos.logs) out.LOG_REPO = d.repos.logs;
+  if (d.repos && d.repos.artifacts) out.ARTIFACT_REPO = d.repos.artifacts;
+  const hashed = Object.entries(d.people).filter(([, e]) => e.codeHash);
+  if (code && hashed.length && env.OWNER_PEPPER && !(await identify(env, code))) {
+    const h = await hmacHex(env.OWNER_PEPPER, code);
+    const taken = new Set(people(env).map((p) => p.slug));
+    let hit = null;
+    for (const [slug, e] of hashed) if (sameText(h, e.codeHash) && !hit) hit = [slug, e]; // no early exit
+    if (hit && !taken.has(hit[0])) {
+      const [slug, e] = hit;
+      const name = e.name && slugify(e.name) === slug ? e.name : slug;
+      const codes = parseJson(env.ACCESS_CODES) || {};
+      codes[code] = { name, agents: Array.isArray(e.agents) ? e.agents : [] };
+      out.ACCESS_CODES = JSON.stringify(codes);
+    }
+  }
+  return out;
+}
+
 /** TODO #51: the config branch, or a 503 for non-admins when it is on but has never been readable (fail closed). */
 async function configFor(env, person, origin) {
-  const cfg = await loadConfig(env);
+  const cfg = env.__awConfig || (await loadConfig(env));
   if (cfg.error && !(person && person.admin)) return { deny: json({ error: "config_unavailable" }, 503, origin) };
   return { cfg };
 }
@@ -264,8 +335,11 @@ async function artifactRoute(request, env, env0, ctx, registry) {
 }
 
 export default {
-  async fetch(request, env, ctx) {
+  async fetch(request, rawEnv, ctx) {
     const url = new URL(request.url);
+    // TODO #52 / #53: apply the config repo (agents, repos, hashed codes) once per request; see configEnv().
+    const cfg0 = request.method === "OPTIONS" ? null : await loadConfig(rawEnv);
+    const env = cfg0 ? await configEnv(rawEnv, cfg0, request.headers.get("X-Access-Code") || "") : rawEnv;
     const registry = agentRegistry(env);
     const env0 = baseEnv(env, registry);
 
@@ -279,6 +353,8 @@ export default {
       const res = await worker.fetch(request, env0, ctx);
       const j = await res.json().catch(() => ({}));
       j.agents = registry.length;
+      // TODO #52 / #53: is the config repo in use, and is it readable? (no names, no contents)
+      j.config = !cfg0 || cfg0.off ? "off" : cfg0.error ? "error" : cfg0.stale ? "stale" : "on";
       return new Response(JSON.stringify(j), { status: res.status, headers: res.headers });
     }
     if (ART_ROUTES.has(url.pathname)) return artifactRoute(request, env, env0, ctx, registry);
@@ -309,6 +385,8 @@ export default {
       j.role = personRole(env, code, person, cf.cfg); // TODO #7 (advisory, see personRole)
       const h = personHeader(cf.cfg, person); // TODO #51: web/header.js puts it on top of the first / every N-th message
       if (h) j.header = h;
+      // TODO #52: where this chat is logged / uploads go (config "repos" or wrangler.toml), for the page's links
+      j.repos = { logs: env.LOG_REPO || "", artifacts: env.ARTIFACT_REPO || "" };
       return json(j, res.status, origin);
     }
     return res;

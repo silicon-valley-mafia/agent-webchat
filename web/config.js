@@ -7,6 +7,7 @@ window.AGENT_WEBCHAT_CONFIG = {
 
   // Look
   theme: "auto",              // "auto" (follow the device), "light" or "dark"; the 🌓 button overrides per browser
+  skin: "classic",            // "classic", "focus" (centered, no reply bubbles) or "contrast" (high contrast); the 🎨 button overrides per browser
   layout: "wide",             // "wide" (full window width) or "narrow" (960 px column); the ↔ button overrides per browser
   accentColor: "#2563eb",     // your bubbles, avatars, buttons
   botAvatarInitials: "GH",

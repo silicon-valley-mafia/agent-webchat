@@ -9,8 +9,9 @@
  *   - owner code (ACCESS_CODE): Worker secret OWNER_FILES = JSON array of "owner/repo/" or "owner/repo/prefix/";
  *   - other codes: "files": [...] in their ACCESS_CODES entry; no entry = nothing (owner decision 2026-11-27);
  *   - TODO #51: "files" in the person's entry in the config branch (src/config.js) replaces both (main.js passes it).
- * Token: Worker secret FILE_READ_TOKEN - a fine-grained PAT with Contents: READ only on those repos. Without it the
- *   route answers {error: "file_disabled"}. LOG_REPO_TOKEN is never used here (it can write).
+ * Token: Worker secret FILE_READ_TOKEN (a read-only PAT), else AGENT_SYSTEM_PAT (the agent system's PAT, owner
+ *   decision 2026-11-28; this code only ever sends GET with it, inside the allow-list). Without either the route
+ *   answers {error: "file_disabled"}. LOG_REPO_TOKEN is never used here.
  * Limits: text files only, FILE_MAX_BYTES (default 30720 = 30 KB), no "..", no ".github/", 1 GitHub request per call.
  */
 
@@ -81,7 +82,8 @@ function decodeB64Utf8(b64) {
  */
 export async function fileRequest(env, code, body, rootsOverride) {
   const maxBytes = parseInt(env.FILE_MAX_BYTES || "30720", 10);
-  if (!env.FILE_READ_TOKEN) return { status: 200, body: { error: "file_disabled" } };
+  const token = env.FILE_READ_TOKEN || env.AGENT_SYSTEM_PAT || "";
+  if (!token) return { status: 200, body: { error: "file_disabled" } };
   const roots = Array.isArray(rootsOverride) ? rootsOverride.map(normRoot).filter(Boolean) : fileRoots(env, code);
   const op = body && body.op;
   if (op === "roots") return { status: 200, body: { roots, maxBytes } };
@@ -103,7 +105,7 @@ export async function fileRequest(env, code, body, rootsOverride) {
   try {
     r = await fetch(url, {
       headers: {
-        Authorization: "Bearer " + env.FILE_READ_TOKEN,
+        Authorization: "Bearer " + token,
         Accept: "application/vnd.github+json",
         "X-GitHub-Api-Version": "2022-11-28",
         "User-Agent": "agent-webchat-insert-file",

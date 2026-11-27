@@ -140,6 +140,23 @@ test("Worker: /file roots come from the config branch ('files'), replacing OWNER
   assert.deepEqual(off.roots, ["silicon-valley-mafia/other/"], "config off = OWNER_FILES as before");
 });
 
+test("CONFIG_REPO + AGENT_SYSTEM_PAT: config read from that repo with that token; /file uses it when no FILE_READ_TOKEN", async () => {
+  const seen = [];
+  globalThis.fetch = async (url, init) => {
+    seen.push({ url: String(url), auth: init && init.headers && init.headers.Authorization });
+    return new Response(JSON.stringify(CONFIG), { status: 200 });
+  };
+  const e2 = { ...env, CONFIG_REPO: "o/agent-webchat-config", CONFIG_BRANCH: "main", AGENT_SYSTEM_PAT: "sys", FILE_READ_TOKEN: "" };
+  const c = await loadConfig(e2);
+  assert.ok(c.data.people.deepesh);
+  assert.equal(seen[0].url, "https://api.github.com/repos/o/agent-webchat-config/contents/config/people.json?ref=main");
+  assert.equal(seen[0].auth, "Bearer sys");
+  const j = await (await worker.fetch(req("/file", "owner-code", { op: "roots" }), e2)).json();
+  assert.deepEqual(j.roots, ["silicon-valley-mafia/agent-plans/"], "file_disabled would mean the PAT fallback failed");
+  _resetConfigCache();
+  assert.deepEqual(await loadConfig({ ...e2, AGENT_SYSTEM_PAT: "", LOG_REPO_TOKEN: "" }), { off: true }, "no token at all = off");
+});
+
 function loadPage(cfg) {
   const posted = [];
   const store = new Map();

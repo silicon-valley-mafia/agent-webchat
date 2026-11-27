@@ -1,0 +1,25 @@
+name: one-shot patch61
+on:
+  push:
+    branches: ['fix/route-marker']
+    paths: ['.github/workflows/patch61.yml']
+permissions:
+  contents: write
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: python3 .github/p61/patch61.py
+      - run: for f in web/*.js; do node --check "$f" || exit 1; done
+      - run: cd worker && node --test test/*.test.js
+      - run: |
+          git rm -rq .github/p61
+          git config user.name 'Deepesh J'
+          git config user.email '263164968+silicon-valley-mafia@users.noreply.github.com'
+          git add -A web worker
+          git commit -m 'fix(#37b): Pass on to Coach also writes a visible [route: coach] first line (the agent AI never sees channelData)'
+          git push

@@ -1,9 +1,9 @@
-// TODO #57 "💾 Save": POST /save writes the ⬇ Download Markdown to saved/<Download file name> and overwrites it later.
+// TODO #57 "💾 Save": POST /save commits the ⬇ Download Markdown into the chat's own log folder and overwrites it later.
 import { test, beforeEach } from "node:test";
 import assert from "node:assert/strict";
 import worker, { OWN_ROUTES } from "../src/main.js";
 import { _resetRateLimiter } from "../src/index.js";
-import { savePath, saveDir, saveEnabled, messagesOf, SAVE_ATTEMPTS } from "../src/save.js";
+import { savePath, saveEnabled, messagesOf, SAVE_ATTEMPTS } from "../src/save.js";
 import "../../web/save.js";
 
 const ORIGIN = "https://silicon-valley-mafia.github.io";
@@ -25,7 +25,9 @@ const env = {
   RATE_LIMIT_PER_MIN: "100",
   API_RATE_LIMIT_PER_MIN: "100",
 };
-const FILE = "saved/2_2026-11-27_1700-deepesh--Conv-9-in.md";
+const FOLDER = "logs/2/2026-11-27/1700-deepesh--Conv-9-in";
+const FILE = FOLDER + "/2_2026-11-27_1700-deepesh--Conv-9-in.md";
+let gqlEntries = [];
 const m = (id, text, t, user) => ({ id, type: "message", text, timestamp: t, from: user ? { id: "dl_abc", role: "user" } : { id: "bot", name: "VLSI Coach", role: "bot" } });
 
 let acts, files, puts, gets, dlAuth, failPuts;
@@ -66,6 +68,7 @@ beforeEach(() => {
       files.set(path, { sha, text: dec(body.content) });
       return Response.json({ content: { sha }, commit: { sha: "c" + puts.length } }, { status: f ? 200 : 201 });
     }
+    if (url === "https://api.github.com/graphql") return Response.json({ data: { repository: { object: { entries: gqlEntries } } } });
     throw new Error("unexpected fetch " + url);
   };
 });
@@ -80,20 +83,25 @@ const save = async (opts = {}, body = { conversationId: "Conv-9-in" }) => {
   return { status: res.status, j: await res.json(), res };
 };
 
-test("first save creates saved/<Download file name> with the same Markdown as /export", async () => {
+test("first save commits the Download file into the chat's own log folder (where /log writes)", async () => {
   const exp = await (await worker.fetch(req("/export", { conversationId: "Conv-9-in" }, { agent: "coach" }), env)).json();
+  assert.equal(exp.folder, FOLDER, "/export names the chat's folder");
+  const log = await (await worker.fetch(req("/log", { conversationId: "Conv-9-in" }, { agent: "coach" }), env)).json();
+  assert.equal(log.folder, FOLDER, "same folder as the message logs");
+  files.clear();
+  puts = [];
   const { status, j, res } = await save();
   assert.equal(status, 200);
   assert.equal(res.headers.get("Access-Control-Allow-Origin"), ORIGIN);
-  assert.equal(FILE, "saved/" + exp.filename);
+  assert.equal(FILE, exp.folder + "/" + exp.filename);
   assert.deepEqual(j, {
-    saved: true, status: "created", path: FILE, repo: env.LOG_REPO, branch: "main",
+    saved: true, status: "created", path: FILE, folder: FOLDER, repo: env.LOG_REPO, branch: "main",
     url: "https://github.com/silicon-valley-mafia/agent-webchat-logs/blob/main/" + FILE, commit: "c1", messages: 2,
   });
   assert.equal(puts.length, 1);
   assert.equal(puts[0].sha, undefined, "new file: no sha");
   assert.equal(puts[0].branch, "main");
-  assert.equal(puts[0].message, "save(deepesh): 2_2026-11-27_1700-deepesh--Conv-9-in.md");
+  assert.equal(puts[0].message, "save(deepesh): 2/2026-11-27/1700-deepesh--Conv-9-in (whole conversation)");
   assert.equal(puts[0].text, exp.markdown);
   assert.equal(dlAuth.at(-1), "Bearer secret-coach", "read through the conversation's agent");
 });
@@ -158,8 +166,21 @@ test("refusals: bad code, read-only code, agent not allowed, bad id, saving off,
 test("ravi (coach only) can save his own chat; without X-Agent his default agent is used", async () => {
   const { status, j } = await save({ code: "ravi-code", agent: undefined });
   assert.equal(status, 200);
-  assert.equal(j.path, "saved/2_2026-11-27_1700-ravi--Conv-9-in.md");
-  assert.equal(puts[0].message, "save(ravi): 2_2026-11-27_1700-ravi--Conv-9-in.md");
+  assert.equal(j.path, "logs/2/2026-11-27/1700-ravi--Conv-9-in/2_2026-11-27_1700-ravi--Conv-9-in.md");
+  assert.match(puts[0].message, /^save\(ravi\): /);
+});
+
+test("History transcript of the folder skips the saved file (no conversation shown twice)", async () => {
+  gqlEntries = [
+    { name: "0000-session.md", type: "blob", object: { text: "# H\n" } },
+    { name: "0001-170005-user.md", type: "blob", object: { text: "### u\n\nhi\n" } },
+    { name: "0002-170009-agent.md", type: "blob", object: { text: "### a\n\nhello\n" } },
+    { name: "2_2026-11-27_1700-deepesh--Conv-9-in.md", type: "blob", object: { text: "WHOLE CONVERSATION" } },
+  ];
+  const j = await (await worker.fetch(req("/transcript", { path: FOLDER }), env)).json();
+  assert.equal(j.files, 3);
+  assert.ok(!j.markdown.includes("WHOLE CONVERSATION"));
+  assert.match(j.markdown, /\| Messages \| 2 \|/);
 });
 
 test("preflight for /save: 204 with X-Agent allowed", async () => {
@@ -169,14 +190,18 @@ test("preflight for /save: 204 with X-Agent allowed", async () => {
   assert.match(r.headers.get("Access-Control-Allow-Headers"), /X-Agent/);
 });
 
-test("helpers: savePath, saveDir, saveEnabled, messagesOf", () => {
-  assert.equal(savePath({}, "1_2026-11-27_0140-deepesh--C-1.md"), "saved/1_2026-11-27_0140-deepesh--C-1.md");
-  assert.equal(savePath({ SAVE_DIR: "/exports/full/" }, "a.md"), "exports/full/a.md");
-  assert.equal(savePath({}, "../a.md"), null);
-  assert.equal(savePath({}, "a/b.md"), null);
-  assert.equal(savePath({}, "a..md"), null);
-  assert.equal(savePath({}, "a.txt"), null);
-  assert.equal(saveDir({ SAVE_DIR: "../etc" }), "saved");
+test("helpers: savePath, saveEnabled, messagesOf", () => {
+  const F = "logs/1/2026-11-27/0140-deepesh--C-1";
+  assert.equal(savePath(F, "1_2026-11-27_0140-deepesh--C-1.md"), F + "/1_2026-11-27_0140-deepesh--C-1.md");
+  assert.equal(savePath("logs/2026-11-27/0140-deepesh--C-1", "2026-11-27_0140-deepesh--C-1.md"),
+    "logs/2026-11-27/0140-deepesh--C-1/conversation_2026-11-27_0140-deepesh--C-1.md", "never looks like a message file");
+  assert.equal(savePath("logs/2026-11-27/0140-deepesh--C-1", "x_0140-deepesh--C-1.md"), "logs/2026-11-27/0140-deepesh--C-1/x_0140-deepesh--C-1.md");
+  assert.equal(savePath("saved", "a.md"), null, "only real session folders");
+  assert.equal(savePath("logs/../x", "a.md"), null);
+  assert.equal(savePath(F, "../a.md"), null);
+  assert.equal(savePath(F, "a/b.md"), null);
+  assert.equal(savePath(F, "a..md"), null);
+  assert.equal(savePath(F, "a.txt"), null);
   assert.equal(saveEnabled({ LOG_REPO: "o/r", LOG_REPO_TOKEN: "t" }), true);
   assert.equal(saveEnabled({ LOG_REPO: "o/r", LOG_REPO_TOKEN: "t", SAVE_BUTTON: "OFF" }), false);
   assert.equal(saveEnabled({ LOG_REPO: "o/r" }), false);
@@ -188,9 +213,9 @@ test("web/save.js pure parts", () => {
   const S = globalThis.AgentSave;
   assert.equal(S.base("https://w.example/token"), "https://w.example");
   assert.equal(S.base("REPLACE_WITH_URL"), "");
-  assert.equal(S.message({ saved: true, status: "created", messages: 2, repo: "o/r", path: "saved/a.md" }), "Saved - 2 messages -> o/r/saved/a.md");
-  assert.equal(S.message({ saved: true, status: "updated", messages: 4, repo: "o/r", path: "saved/a.md" }), "Saved (overwritten) - 4 messages -> o/r/saved/a.md");
-  assert.equal(S.message({ saved: true, status: "unchanged", repo: "o/r", path: "saved/a.md" }), "Already up to date -> o/r/saved/a.md");
+  assert.equal(S.message({ saved: true, status: "created", messages: 2, repo: "o/r", path: "logs/x/a.md" }), "Saved - 2 messages -> o/r/logs/x/a.md");
+  assert.equal(S.message({ saved: true, status: "updated", messages: 4, repo: "o/r", path: "logs/x/a.md" }), "Saved (overwritten) - 4 messages -> o/r/logs/x/a.md");
+  assert.equal(S.message({ saved: true, status: "unchanged", repo: "o/r", path: "logs/x/a.md" }), "Already up to date -> o/r/logs/x/a.md");
   assert.equal(S.message({ error: "read_only" }, 403), "Save failed: This access code is read-only - it can't save to GitHub.");
   assert.equal(S.message({}, 500), "Save failed: HTTP 500");
   assert.equal(S.agentId("C1", null, {}), "", "single-agent setups send no X-Agent");

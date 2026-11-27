@@ -534,7 +534,8 @@
     clearTimeout(s.replyTimer);
     s.replyTimer = setTimeout(function () { markReplied(s); }, kind === "interim" ? INTERIM_GRACE_MS : REPLY_QUIET_MS);
   }
-  function agentTyping(s) {
+  function agentTyping(s, kind) {
+    if (kind === "interim" && s.pendingSince) s.lastKind = "interim"; // #55: informative / streaming typing note
     if (!s.pendingSince || !s.replyTimer) return; // only after a first reply of this turn
     clearTimeout(s.replyTimer);
     s.replyTimer = setTimeout(function () { markReplied(s); }, s.lastKind === "interim" ? INTERIM_GRACE_MS : TYPING_GRACE_MS);
@@ -813,7 +814,8 @@
       next: function (a) {
         if (!a) return;
         if (a.conversation && a.conversation.id) s.conversationId = a.conversation.id;
-        if (a.type === "typing" && !mine(s, a)) { agentTyping(s); return; }
+        if (a.type === "typing" && !mine(s, a)) { agentTyping(s, turnKind(s, a)); return; }
+        if (a.type === "endOfConversation" && !mine(s, a)) { if (s.pendingSince && turnKind(s, a) === "end") markReplied(s); return; } // #55
         if (a.type !== "message") return;
         var old = a.timestamp && Date.parse(a.timestamp) < s.startedAt - 5000;
         if (!old) scheduleLog(s);

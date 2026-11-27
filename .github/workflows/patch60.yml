@@ -1,0 +1,24 @@
+name: one-shot patch60
+on:
+  push:
+    branches: ['sec/file-hardening']
+    paths: ['.github/workflows/patch60.yml']
+permissions:
+  contents: write
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: python3 .github/p60/patch60.py
+      - run: cd worker && node --test test/*.test.js
+      - run: |
+          git rm -rq .github/p60
+          git config user.name 'Deepesh J'
+          git config user.email '263164968+silicon-valley-mafia@users.noreply.github.com'
+          git add -A worker
+          git commit -m 'sec: /file hardening - default branch only, no symlinks, secret-looking names refused, own rate limit, audit record per read'
+          git push

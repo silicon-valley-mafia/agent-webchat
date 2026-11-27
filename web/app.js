@@ -419,6 +419,33 @@
     s.store.dispatch({ type: "WEB_CHAT/SET_SEND_BOX", payload: { text: "" } });
     s.store.dispatch({ type: "DIRECT_LINE/POST_ACTIVITY", meta: { method: "keyboard" }, payload: { activity: { type: "message", text: text } } });
   }
+  /**
+   * Web Chat 4.19 refuses to submit when ITS send box text and ITS attachment list are both empty
+   * (SendBoxComposer "empty" error), so with only our staged files Enter / the send button did nothing.
+   * Catch them first (capture phase) and send the staged files ourselves.
+   */
+  function stagedOnlySubmit(s, e) {
+    if (!staged.length || s !== current) return false;
+    var t = e.target;
+    if (!t || !t.closest || !s.mount.contains(t)) return false;
+    if (e.type === "keydown") {
+      if (e.key !== "Enter" || e.shiftKey || e.ctrlKey || e.altKey || e.metaKey || e.isComposing || e.keyCode === 229) return false;
+      if (!(t.tagName === "TEXTAREA" || t.tagName === "INPUT") || !t.closest(".webchat__send-box")) return false;
+      if (String(t.value || "").trim()) return false;
+    } else if (!t.closest(".webchat__send-button")) {
+      return false;
+    }
+    if (sendBoxText(s).trim()) return false; // typed text: Web Chat sends it and storeMiddleware adds the staged files
+    e.preventDefault();
+    e.stopPropagation();
+    sendStaged();
+    return true;
+  }
+  function hookStagedSubmit(s) {
+    var h = function (e) { stagedOnlySubmit(s, e); };
+    s.mount.addEventListener("keydown", h, true);
+    s.mount.addEventListener("click", h, true);
+  }
   function toAttachments(files) {
     return files.map(function (f) { return { contentType: f.type || "application/octet-stream", contentUrl: URL.createObjectURL(f), name: f.name }; });
   }
@@ -472,6 +499,16 @@
           var s = holder.s;
           var type = action && action.type;
 
+          // Web Chat 4.16+ (default sendAttachmentOn: "send"): the paperclip fills Web Chat's OWN attachment bar.
+          // Move those files to our chips so there is one list, one Send path and the zip/split/artifact logic applies.
+          if (type === "WEB_CHAT/SET_SEND_BOX_ATTACHMENTS" && s && stagingOn() && action.payload &&
+              action.payload.attachments && action.payload.attachments.length &&
+              action.payload.attachments.every(function (a) { return a && a.blob instanceof Blob; })) {
+            stageFiles(action.payload.attachments.map(function (a) {
+              return a.blob instanceof File ? a.blob : new File([a.blob], a.name || "file", { type: a.blob.type || "" });
+            }));
+            return next(Object.assign({}, action, { payload: Object.assign({}, action.payload, { attachments: Object.freeze([]) }) }));
+          }
           // paperclip -> stage instead of sending (TODO #10)
           if (type === "WEB_CHAT/SEND_FILES" && s && stagingOn() && action.payload && action.payload.files && action.payload.files.length) {
             Promise.all(action.payload.files.map(function (f) {
@@ -846,6 +883,7 @@
     s.mount = document.createElement("div");
     el.chatWrap.appendChild(s.mount);
     hookMic(s);
+    hookStagedSubmit(s);
     renderChat(s);
     if (window.MutationObserver) {
       s.observer = new MutationObserver(function () { scheduleDecorate(s); });
@@ -1174,6 +1212,7 @@
     renderMarkdown: renderMarkdown, parseIds: parseIds, styleOptions: styleOptions, fileName: fileName,
     prepareOutgoing: prepareOutgoing, filesMiddleware: filesMiddleware, storeMiddleware: storeMiddleware, sendFiles: sendFiles,
     uploads: uploads, staged: function () { return staged.slice(); }, stageFiles: stageFiles, sendStaged: sendStaged,
+    stagedOnlySubmit: stagedOnlySubmit,
     decorate: function () { decorate(current); }, activityMiddleware: activityMiddleware, clearChat: clearChat
   };
 })();

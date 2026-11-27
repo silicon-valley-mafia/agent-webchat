@@ -536,6 +536,7 @@
             var inc = action.payload.activity;
             if ((inc.type === "message" || inc.type === "typing") && !mine(s, inc)) {
               if (inc.type === "message" && inc.id && typeof inc.text === "string") rememberReply(s, inc);
+              if (inc.type === "message") agentErrorHint(s, inc);
               if (typeof inc.text === "string" && cfg.escapeAngleBrackets !== false && U) {
                 var esc = U.escapeAngles(inc.text);
                 if (esc !== inc.text) {
@@ -590,6 +591,24 @@
   }
   // kept for compatibility with earlier code/tests
   var filesMiddleware = storeMiddleware;
+
+  /**
+   * Copilot Studio failures arrive as ordinary replies ("... reference code MCS-4041 ... (Error code: SystemError)").
+   * Seen repeatedly at the end of very long conversations: retrying in the same conversation doesn't help, so say so.
+   * Only for new replies (not history replayed on resume).
+   */
+  function isAgentError(text) {
+    return typeof text === "string" && /\bMCS-\d{3,}\b/.test(text) && /error/i.test(text);
+  }
+  function agentErrorHint(s, a) {
+    if (!isAgentError(a.text)) return;
+    var t = Date.parse(a.timestamp || "");
+    if (t && t < s.startedAt - 5000) return;
+    var code = (/\bMCS-\d{3,}\b/.exec(a.text) || [""])[0];
+    notice("The agent hit an error on its side (" + code + "). If it happens again, this conversation is probably stuck - start a New chat (History keeps this one).", { autoHideMs: 120000 });
+    var nc = button("New chat", function () { notice(""); el.newChat.click(); });
+    el.notice.appendChild(nc);
+  }
 
   // ---------------- replies: copy (TODO #17) + collapse (TODO #19) ----------------
   function rememberReply(s, a) {
@@ -741,11 +760,26 @@
         timestamp: new Date().toISOString(), channelData: {} } }
     });
   }
+  /**
+   * "Cleared at" in SERVER time: the newest activity timestamp on screen (+1 ms). Using Date.now() hid fresh replies
+   * whenever the device clock ran ahead of Direct Line's clock (activities are compared by their server timestamp).
+   */
+  function clearMarker(s) {
+    var newest = 0;
+    try {
+      s.store.getState().activities.forEach(function (a) {
+        if (a && a.type === "event" && a.name === "aw/refresh") return;
+        var t = Date.parse((a && a.timestamp) || "");
+        if (t > newest) newest = t;
+      });
+    } catch (e) {}
+    return newest ? newest + 1 : Date.now();
+  }
   function clearChat() {
     var s = current;
     if (!s || !s.conversationId) return;
     if (!window.confirm("Clear the screen?\n\nThe agent still remembers this conversation (use New chat for a fresh start). The saved transcript and attachments are not touched.")) return;
-    setCleared(s, Date.now());
+    setCleared(s, clearMarker(s));
     refreshTranscript(s);
     notice("Chat cleared - same session, the agent still remembers it.", { autoHideMs: 10000 });
     var undo = button("Undo", function () { setCleared(s, 0); refreshTranscript(s); notice(""); });
@@ -1212,7 +1246,7 @@
     renderMarkdown: renderMarkdown, parseIds: parseIds, styleOptions: styleOptions, fileName: fileName,
     prepareOutgoing: prepareOutgoing, filesMiddleware: filesMiddleware, storeMiddleware: storeMiddleware, sendFiles: sendFiles,
     uploads: uploads, staged: function () { return staged.slice(); }, stageFiles: stageFiles, sendStaged: sendStaged,
-    stagedOnlySubmit: stagedOnlySubmit,
+    stagedOnlySubmit: stagedOnlySubmit, isAgentError: isAgentError, clearMarker: clearMarker,
     decorate: function () { decorate(current); }, activityMiddleware: activityMiddleware, clearChat: clearChat
   };
 })();

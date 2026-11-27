@@ -82,17 +82,20 @@ export function agentRegistry(env) {
   }
   for (const [id, v] of Object.entries(extra)) {
     if (!AGENT_ID_RE.test(id) || !v || typeof v !== "object") continue;
-    const secret = typeof v.secret === "string" && v.secret ? v.secret : typeof v.secretName === "string" ? secretValue(env, v.secretName) : "";
+    const secret = typeof v.secret === "string" && v.secret ? v.secret : typeof v.secretName === "string" ? secretValue(env, v.secretName) : id === defId ? env.DIRECTLINE_SECRET || "" : "";
     if (!secret || typeof secret !== "string") continue;
     const a = {
       id,
-      name: String(v.name || id).slice(0, 60),
+      name: String(v.name || (id === defId && env.DEFAULT_AGENT_NAME) || id).slice(0, 60),
       description: String(v.description || "").slice(0, 200),
-      initials: String(v.initials || "").slice(0, 3),
+      initials: String(v.initials || (id === defId && env.DEFAULT_AGENT_INITIALS) || "").slice(0, 3),
       secret,
       num: folderNum(v.num) || (id === defId ? folderNum(env.DEFAULT_AGENT_NUM) || 1 : null),
       // TODO #37b: agents this one can pass messages on to ("➡ Pass on to Coach" chip on the page), e.g. ["coach"]
       routes: Array.isArray(v.routes) ? v.routes.map(String).filter((r) => AGENT_ID_RE.test(r)).slice(0, 5) : [],
+      // TODO #45 / #46: starter prompt chips on an empty chat; plan board in this agent's chats
+      starters: Array.isArray(v.starters) ? v.starters.filter((x) => typeof x === "string" && x.trim() && x.length <= 300).map((x) => x.trim()).slice(0, 6) : [],
+      plans: v.plans === true,
     };
     if (id === defId) out.unshift(a);
     else out.push(a);
@@ -232,6 +235,8 @@ export function pickAgent(registry, allowed, rules, requested) {
 export const publicAgent = (a) => {
   const p = { id: a.id, name: a.name, description: a.description, initials: a.initials };
   if (a.routes && a.routes.length) p.routes = a.routes.slice(); // only agents that have routes (TODO #37b)
+  if (a.starters && a.starters.length) p.starters = a.starters.slice(); // TODO #45
+  if (a.plans) p.plans = true; // TODO #46
   return p;
 };
 
@@ -289,7 +294,9 @@ async function handleAgents(request, env, registry) {
   const rules = personRules(env, code, person, cf.cfg);
   const allowed = allowedAgents(registry, rules);
   const d = pickAgent(registry, allowed, rules, "");
-  return json({ agents: allowed.map(publicAgent), default: d.agent ? d.agent.id : null, person: person.name }, 200, origin);
+  // nums: folder number per agent (logs/<N>/), for the History filter (TODO #20)
+  return json({ agents: allowed.map(publicAgent), default: d.agent ? d.agent.id : null, person: person.name,
+    nums: Object.fromEntries(allowed.map((a) => [a.id, a.num])) }, 200, origin);
 }
 
 /** TODO #37a: POST /file -> worker/src/repofile.js (allow-list per code, read-only token). */

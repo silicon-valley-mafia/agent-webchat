@@ -72,7 +72,7 @@ const HASH_RE = /^[0-9a-f]{64}$/;
 const isObj = (v) => !!v && typeof v === "object" && !Array.isArray(v);
 
 /**
- * TODO #53: non-secret agent settings. {"spark": {"name","description","initials","num","routes","secretName"}}.
+ * TODO #53: non-secret agent settings. {"spark": {"name","description","initials","num","routes","secretName","starters","plans"}}.
  * A "secret" key is ignored on purpose: Direct Line secrets stay Worker secrets; "secretName" says which one.
  */
 function normAgents(raw) {
@@ -84,6 +84,9 @@ function normAgents(raw) {
     for (const k of ["name", "description", "initials"]) if (typeof v[k] === "string") a[k] = v[k];
     if (v.num !== undefined) a.num = v.num;
     if (Array.isArray(v.routes)) a.routes = v.routes.map(String).slice(0, 5);
+    // TODO #45 / #46: starter prompt chips on an empty chat (up to 6), plan board in this agent's chats
+    if (Array.isArray(v.starters)) a.starters = v.starters.filter((x) => typeof x === "string" && x.trim() && x.length <= 300).map((x) => x.trim()).slice(0, 6);
+    if (typeof v.plans === "boolean") a.plans = v.plans;
     if (typeof v.secretName === "string" && SECRET_NAME_RE.test(v.secretName)) a.secretName = v.secretName;
     out[id] = a;
   }

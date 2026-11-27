@@ -986,6 +986,7 @@
         }
         var row = document.createElement("div");
         row.className = "row";
+        row.setAttribute("data-agent", String(item.agent || 1)); // TODO #20: web/historyfilter.js
         var label = document.createElement("span");
         label.textContent = item.time + (current && current.admin ? "  ·  " + item.person : "") +
           "  ·  " + (item.messages || 0) + " msg" + (item.messages === 1 ? "" : "s") + (item.repo ? "  ·  older logs repo" : "");

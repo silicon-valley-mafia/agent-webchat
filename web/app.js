@@ -894,7 +894,8 @@
     // P11: re-attaching the same conversation (🌓, skin) keeps what was typed
     var carry = previous && previous.conversationId && previous.conversationId === t.conversationId ? sendBoxText(previous) : "";
     current = null;
-    stopSession(previous, true);
+    var R = window.AgentRail; // TODO #23: keep other conversations alive (parked), web/rail.js
+    if (!(R && previous && previous.conversationId !== t.conversationId && R.park(previous, t.conversationId))) stopSession(previous, true);
 
     var dlOpts = { token: t.token, domain: t.domain };
     if (resumed) { dlOpts.conversationId = t.conversationId; dlOpts.watermark = ""; dlOpts.webSocket = false; dlOpts.pollingInterval = 1500; }
@@ -960,6 +961,22 @@
     sessionButtons(true);
     el.status.textContent = "";
     return s;
+  }
+  /** TODO #23: show a parked live session again (same connection and store - no /resume, nothing replayed). */
+  function swap(s) {
+    var p = current, R = window.AgentRail;
+    if (!s || p === s) return;
+    if (!(p && R && R.park(p, s.conversationId))) stopSession(p, true);
+    el.chatWrap.innerHTML = "";
+    el.chatWrap.appendChild(s.mount);
+    current = s;
+    try { renderChat(s); } catch (e) {}
+    rememberSession(s);
+    setLogState("");
+    paintWork();
+    if (Q) Q.paint(s);
+    scheduleDecorate(s);
+    if (s.dirty) scheduleLog(s, 300);
   }
   function sessionButtons(show) {
     [el.newChat, el.forget, el.history, el.download, el.clear, el.session].forEach(function (b) { if (b) b.hidden = !show; });
@@ -1265,6 +1282,7 @@
     firstActivityTime: firstActivityTime, applyTheme: function () { applyTheme(); },
     rememberSession: rememberSession, lastSession: lastSession, recentSessions: recentSessions, recentBlock: recentBlock,
     queue: Q, markReplied: markReplied,
-    decorate: function () { decorate(current); }, activityMiddleware: activityMiddleware, clearChat: clearChat
+    decorate: function () { decorate(current); }, activityMiddleware: activityMiddleware, clearChat: clearChat,
+    cur: function () { return current; }, swap: swap, stop: stopSession, resume: resumeConversation
   };
 })();

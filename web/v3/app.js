@@ -14,6 +14,7 @@
   var POLL_MS = 1000;
   var LOG_DEBOUNCE_MS = 4000;
   var QUIET_MS = 3000;
+  var NOTE_QUIET_MS = 20000;                 // after a progress note without a "final" marker
 
   var $ = function (id) { return document.getElementById(id); };
   var el = { gate: $("gate"), code: $("code"), status: $("status"), chat: $("chat"), who: $("who"), work: $("work"),
@@ -83,7 +84,10 @@
     });
     return t;
   }
-  function mine(a) { return !!(a.from && (a.from.id === s.userId || a.from.role === "user")); }
+  // Microsoft: agent messages carry from.role "bot"; user messages have no role (Direct Line may rewrite from.id).
+  function mine(a) { return !(a.from && a.from.role === "bot"); }
+  // The agent's last message of a turn carries inputHint "acceptingInput"/"expectingInput"; progress notes don't.
+  function finalReply(a) { return a.inputHint === "acceptingInput" || a.inputHint === "expectingInput"; }
   function fetchNew() {
     var out = [];
     function page() {
@@ -100,14 +104,16 @@
   function poll() {
     clearTimeout(pollTimer);
     fetchNew().then(function (acts) {
-      var got = false;
+      var got = false, done = false;
       acts.forEach(function (a) {
         if (a.type !== "message" || mine(a)) return;
         got = true;
+        if (finalReply(a)) done = true;
         if (signals) signals.onResponse({ role: "ai", text: textOf(a) });
       });
       if (acts.some(function (a) { return a.type === "message"; })) { save(); scheduleLog(); }
-      if (got) working(false);
+      if (done) working(false, 0);
+      else if (got) working(false, NOTE_QUIET_MS); // only progress notes so far: keep "working" a while longer
     }).catch(function (e) {
       if (e && (e.status === 403 || e.status === 401)) notice("The connection expired - use New chat (the old one stays in History on the main page).");
     }).then(function () { pollTimer = setTimeout(poll, POLL_MS); });
@@ -115,7 +121,7 @@
 
   // ---------- "agent is working" (cleared 3 s after the last reply) ----------
   var since = 0, tick = null;
-  function working(on) {
+  function working(on, quietMs) {
     clearTimeout(quietTimer);
     if (on) {
       since = Date.now();
@@ -125,7 +131,7 @@
       el.work.hidden = false;
       return;
     }
-    quietTimer = setTimeout(function () { clearInterval(tick); el.work.hidden = true; }, QUIET_MS);
+    quietTimer = setTimeout(function () { clearInterval(tick); el.work.hidden = true; }, typeof quietMs === "number" ? quietMs : QUIET_MS);
   }
 
   // ---------- transcript logging (same Worker /log as the main page) ----------

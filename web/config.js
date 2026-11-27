@@ -39,6 +39,7 @@ window.AGENT_WEBCHAT_CONFIG = {
   insertFile: true,           // web/insert.js - 📄 File: insert a .md/.txt from an allowed repo path into the message (TODO #37a)
   routeToggle: true,          // web/route.js - "➡ Pass on to Coach" chip for agents with "routes" in AGENTS (TODO #37b)
   sessionHeader: true,        // web/header.js - your session header from the private config branch on message 1, then every N (TODO #51)
+  copyPrompt: true,           // web/copyprompt.js - Copy / Reuse under the messages you send (TODO #50)
 
   // Session panel (ⓘ) links - private repos, links only work for people with access
   logTimeZone: "Asia/Kolkata",

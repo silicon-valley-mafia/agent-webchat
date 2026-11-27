@@ -14,6 +14,8 @@
  *   /token /resume /log /export take an optional X-Agent header; the Worker picks that agent's Direct Line secret.
  *   No header = the person's default agent (old cached pages keep working). Not allowed -> 403 agent_not_allowed.
  *   /token and /resume answers gain {agent:{id,name,initials}}. Secrets never leave the Worker.
+ * Transcripts (TODO #44): each agent logs into its own numbered folder logs/<num>/ (default agent = 1, AGENTS
+ *   entries "num": 2, 3, ...); index.js writes logs/<num>/AGENT.md once to say which agent a number is.
  */
 import worker, { identify, rateLimited, json } from "./index.js";
 
@@ -30,7 +32,18 @@ function parseJson(s) {
   }
 }
 
-/** All agents that have a secret, default agent first: [{id, name, description, initials, secret}]. */
+/** Valid log folder number (1-999) or null. */
+export function folderNum(v) {
+  const n = Number(v);
+  return Number.isInteger(n) && n >= 1 && n <= 999 ? n : null;
+}
+
+/**
+ * All agents that have a secret, default agent first: [{id, name, description, initials, secret, num}].
+ * num = the agent's transcript folder logs/<num>/ (TODO #44): the default agent is DEFAULT_AGENT_NUM (1); an AGENTS
+ * entry uses its "num"; without one it gets the lowest free number from 2 up, in AGENTS order. Set "num" explicitly
+ * so removing an agent never renumbers the others.
+ */
 export function agentRegistry(env) {
   const extra = parseJson(env.AGENTS) || {};
   const defId = AGENT_ID_RE.test(env.DEFAULT_AGENT_ID || "") ? env.DEFAULT_AGENT_ID : "default";
@@ -42,6 +55,7 @@ export function agentRegistry(env) {
       description: env.DEFAULT_AGENT_DESCRIPTION || "",
       initials: env.DEFAULT_AGENT_INITIALS || "",
       secret: env.DIRECTLINE_SECRET,
+      num: folderNum(env.DEFAULT_AGENT_NUM) || 1,
     });
   }
   for (const [id, v] of Object.entries(extra)) {
@@ -54,9 +68,23 @@ export function agentRegistry(env) {
       description: String(v.description || "").slice(0, 200),
       initials: String(v.initials || "").slice(0, 3),
       secret,
+      num: folderNum(v.num) || (id === defId ? folderNum(env.DEFAULT_AGENT_NUM) || 1 : null),
     };
     if (id === defId) out.unshift(a);
     else out.push(a);
+  }
+  // Explicit numbers first; a duplicate or missing number gets the lowest free one (2, 3, ...).
+  const used = new Set();
+  for (const a of out) {
+    if (a.num && !used.has(a.num)) used.add(a.num);
+    else a.num = null;
+  }
+  let next = 2;
+  for (const a of out) {
+    if (a.num) continue;
+    while (used.has(next)) next++;
+    a.num = next;
+    used.add(next);
   }
   return out;
 }
@@ -159,7 +187,7 @@ export default {
       return json({ error: pick.error }, pick.status, origin);
     }
     const a = pick.agent;
-    const res = await worker.fetch(request, { ...env, DIRECTLINE_SECRET: a.secret }, ctx);
+    const res = await worker.fetch(request, { ...env, DIRECTLINE_SECRET: a.secret, LOG_AGENT_NUM: String(a.num), LOG_AGENT_ID: a.id, LOG_AGENT_NAME: a.name }, ctx);
     if ((url.pathname === "/token" || url.pathname === "/resume") && res.ok) {
       const j = await res.json().catch(() => null);
       if (!j) return res;

@@ -22,7 +22,7 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 22
-      - run: node --test test/token.test.js test/log.test.js test/features.test.js test/artifact.test.js test/files.test.js test/ui.test.js test/pages.test.js test/voice.test.js test/agents.test.js test/turns.test.js test/stop.test.js test/group.test.js
+      - run: node --test test/token.test.js test/log.test.js test/features.test.js test/artifact.test.js test/files.test.js test/ui.test.js test/pages.test.js test/voice.test.js test/agents.test.js test/turns.test.js test/stop.test.js test/group.test.js test/agentlogs.test.js
 
   deploy:
     needs: test
@@ -79,7 +79,7 @@ jobs:
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
           AGENTS: ${{ secrets.AGENTS }}
         run: |
-          printf '%s' "$AGENTS" | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{try{const o=JSON.parse(s);if(!o||typeof o!=="object"||Array.isArray(o))throw 0;const ids=Object.keys(o);for(const id of ids){if(!/^[a-z0-9][a-z0-9_-]{0,31}$/.test(id))throw "bad id "+id;const v=o[id];if(!v||!(v.secret||v.secretName))throw "agent "+id+" has no secret"}console.log("AGENTS OK: "+ids.join(", "))}catch(e){console.error("AGENTS must be JSON like {\"coach\":{\"name\":\"VLSI Coach\",\"secret\":\"...\"}}: "+(typeof e==="string"?e:"not a JSON object"));process.exit(1)}})'
+          printf '%s' "$AGENTS" | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{try{const o=JSON.parse(s);if(!o||typeof o!=="object"||Array.isArray(o))throw 0;const ids=Object.keys(o);const nums={};for(const id of ids){if(!/^[a-z0-9][a-z0-9_-]{0,31}$/.test(id))throw "bad id "+id;const v=o[id];if(!v||!(v.secret||v.secretName))throw "agent "+id+" has no secret";if(v.num!==undefined){const n=Number(v.num);if(!Number.isInteger(n)||n<1||n>999)throw "agent "+id+": num must be 1-999";if(nums[n])throw "agents "+nums[n]+" and "+id+" share log folder num "+n;nums[n]=id}else console.log("note: agent "+id+" has no num - it gets the lowest free log folder; set num so it never shifts")}console.log("AGENTS OK: "+ids.map(i=>i+(o[i].num?" (logs/"+o[i].num+"/)":"")).join(", "))}catch(e){console.error("AGENTS must be JSON like {\"coach\":{\"name\":\"VLSI Coach\",\"num\":2,\"secret\":\"...\"}}: "+(typeof e==="string"?e:"not a JSON object"));process.exit(1)}})'
           printf '%s' "$AGENTS" | npx --yes wrangler@3 secret put AGENTS
       - name: Set separate artifact-repo token
         if: env.CF_TOKEN != '' && env.HAS_ARTIFACT_TOKEN == 'true'

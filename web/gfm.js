@@ -341,19 +341,30 @@
   if (cfg.agentColors !== false) de.classList.add("aw-agentcolors");
 
   /* ---------- DOM pass ---------- */
-  function rawOf(shown, fromUser) {
-    // prefer the exact text from the store (keeps indentation and line breaks); fall back to what is shown
+  /** The store activity a bubble shows (AgentTime.match ignores the session header, fence lines and alert markers). */
+  function storeAct(shown, fromUser) {
     var a = root.__agentWebchat, s = a && a.cur ? a.cur() : null, st = s && s.store;
-    if (st && root.AgentTime && root.AgentTime.match) {
-      try {
-        var act = root.AgentTime.match(st.getState().activities || [], shown, fromUser !== false, null);
-        if (act && typeof act.text === "string") {
-          var orig = act.channelData && act.channelData.awOriginalText;
-          return typeof orig === "string" ? orig : act.text;
-        }
-      } catch (e) {}
+    if (!st || !root.AgentTime || !root.AgentTime.match) return null;
+    try {
+      var act = root.AgentTime.match(st.getState().activities || [], shown, fromUser, null);
+      return act && typeof act.text === "string" ? act : null;
+    } catch (e) { return null; }
+  }
+  function actText(act) {
+    var orig = act.channelData && act.channelData.awOriginalText;
+    return typeof orig === "string" ? orig : act.text;
+  }
+  /** Raw text of an agent reply (null when the store has no match). */
+  function rawOf(shown) { var act = storeAct(shown, false); return act ? actText(act) : null; }
+  /** Text of Web Chat's own (hidden or visible) text element, one line per paragraph / line break. */
+  function domText(src) {
+    var ps = src.querySelectorAll("p");
+    if (ps.length > 1) {
+      return Array.prototype.map.call(ps, function (p) {
+        return Array.prototype.map.call(p.childNodes, function (n) { return n.nodeName === "BR" ? "\n" : n.textContent; }).join("");
+      }).join("\n");
     }
-    return fromUser === false ? null : shown;
+    return src.classList.contains("aw-src") ? (src.textContent || "") : (src.innerText || src.textContent || "");
   }
 
   /* agent replies: Web Chat renders the Markdown; add what its renderer lacks (alerts, task lists, code colours) */
@@ -423,7 +434,7 @@
         var lang = langOf(code);
         if (!lang) {
           if (langs === null) {
-            var raw = rawOf(c.innerText || c.textContent || "", false);
+            var raw = rawOf(c.innerText || c.textContent || "");
             langs = raw == null ? [] : (c.__awLangs = fenceLangs(raw));
           }
           lang = langs[k] || "";
@@ -450,12 +461,16 @@
       var key = src.textContent || "";
       if (!key.trim()) return;
       var view = c.querySelector(".aw-prompt");
-      if (view && c.__awKey === key) return;
-      // innerText keeps line breaks while the original is still visible (first pass)
-      var shown = src.classList.contains("aw-src") ? key : (src.innerText || key);
-      var raw = rawOf(shown);
+      if (view && c.__awKey === key && c.__awFrom === "store") { src.classList.add("aw-src"); return; }
+      // the exact text from the store (keeps line breaks, indentation, the session header); else what is shown
+      var shown = domText(src);
+      var act = storeAct(shown, true);
+      if (view && c.__awKey === key && !act) { src.classList.add("aw-src"); return; }
+      var raw = act ? actText(act) : shown;
+      c.__awFrom = act ? "store" : "dom";
       if (!view) { view = doc.createElement("div"); view.className = "aw-prompt aw-md"; src.parentNode.insertBefore(view, src.nextSibling); }
       view.innerHTML = renderPrompt(raw);
+      view.setAttribute("data-aw-from", c.__awFrom);
       src.classList.add("aw-src");
       c.__awKey = key;
       var b = c.closest ? c.closest(".webchat__bubble") : null;

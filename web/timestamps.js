@@ -17,20 +17,38 @@
 
   /* ---------- pure helpers (tested in worker/test/rail.test.js and gfm.test.js) ---------- */
   /** Letters and digits only, lower case: rendered Markdown and the raw activity text compare equal. */
-  function norm(t) { return String(t || "").toLowerCase().replace(/[^a-z0-9\u00c0-\uffff]+/g, ""); }
+  function norm(t) {
+    var s = String(t || "").toLowerCase();
+    try { return s.replace(/[^\p{L}\p{N}]+/gu, ""); } catch (e) { return s.replace(/[^a-z0-9\u00c0-\u024f\u0370-\u1fff\u3040-\u9fff\uac00-\ud7af]+/g, ""); }
+  }
+  /**
+   * Text as it shows on screen: without the #51 session header block, the #37b route line, code fence lines
+   * (```verilog is not shown) and alert markers ([!NOTE] shows as "Note"). Used on both sides of a match.
+   */
+  function visible(t) {
+    var s = String(t || "").replace(/\r\n?/g, "\n");
+    if (s.indexOf("[session header]\n") === 0) {
+      var end = s.indexOf("\n[end of header]");
+      if (end > 0) s = s.slice(end + "\n[end of header]".length);
+    }
+    return s.replace(/^\s*\[route: [A-Za-z0-9_-]+\]\s*\n/, "")
+      .replace(/^[ \t]{0,12}(`{3,}|~{3,}).*$/gm, "")
+      .replace(/^([ \t]*>[ \t]*)\[!(NOTE|TIP|IMPORTANT|WARNING|CAUTION)\]/gim, "$1$2");
+  }
   /**
    * The activity a rendered bubble belongs to: newest unused message from the same side whose text starts the same
    * way (24 letters - links/Markdown further in may render differently). A bubble without text (attachments only)
    * gets the newest unused message without text that has attachments. Returns the activity or null.
    */
   function match(acts, text, fromUser, used) {
-    var k = norm(text).slice(0, 24);
+    var k = norm(visible(text)).slice(0, 24);
     for (var i = (acts || []).length - 1; i >= 0; i--) {
       var a = acts[i];
       if (!a || a.type !== "message" || !a.timestamp || (used && used[a.id])) continue;
       var isUser = !!(a.from && a.from.role === "user");
       if (isUser !== !!fromUser) continue;
-      var ak = norm(a.text).slice(0, 24);
+      var orig = a.channelData && typeof a.channelData.awOriginalText === "string" ? a.channelData.awOriginalText : a.text;
+      var ak = norm(visible(orig)).slice(0, 24);
       if (k.length < 2) { if (!ak && (a.attachments || []).length) return a; continue; }
       if (ak && (ak === k || (k.length < 24 && ak.indexOf(k) === 0))) return a;
     }
@@ -70,7 +88,7 @@
       return new Intl.DateTimeFormat(loc, o).format(d).replace(/,/g, "") + ", " + time;
     } catch (e) { return d.toLocaleString(); }
   }
-  var api = { norm: norm, match: match, format: format, short: short, mode: MODE };
+  var api = { norm: norm, visible: visible, match: match, format: format, short: short, mode: MODE };
   root.AgentTime = api;
 
   var doc = root.document;

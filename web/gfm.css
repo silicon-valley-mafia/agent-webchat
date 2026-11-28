@@ -135,3 +135,14 @@ html.aw-agentcolors #gtabs button:nth-child(3) { border-bottom: 3px solid #8250d
 html.aw-agentcolors #gtabs button:nth-child(4) { border-bottom: 3px solid #cf222e; }
 html.aw-agentcolors #gtabs button:nth-child(5) { border-bottom: 3px solid #bc4c00; }
 html.aw-agentcolors #gtabs button:nth-child(6) { border-bottom: 3px solid #1b7c83; }
+
+/* ---------- tool bars beside tall messages (owner screenshots 2026-11-28 06:10-06:17 IST, 1080p / 2K / tab) ----------
+ * The bubble is a flex row, so the bar next to it was stretched to the message height: prompt Copy / Reuse became
+ * tall empty boxes, and reply Copy / Copy MD / Show less were spread down the whole reply. Now they sit at the top
+ * and stay in view while you scroll a long message. */
+.webchat__bubble > .aw-ptools, .webchat__bubble > .aw-tools {
+  align-self: flex-start; align-items: flex-start; align-content: flex-start; position: sticky; top: 4px; z-index: 1;
+}
+.webchat__bubble > .aw-ptools .aw-ptool { align-self: flex-start; }
+/* rendered prompt: same inner padding as Web Chat's own text */
+.aw-prompt { padding: 8px 12px; }

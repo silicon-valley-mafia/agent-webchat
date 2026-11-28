@@ -52,7 +52,7 @@
   }
   api.agentOf = agentOf;
   function visibleBox() {
-    var all = root.document.querySelectorAll(".webchat__send-box-text-box__input");
+    var all = root.document.querySelectorAll(".webchat__send-box-text-box__html-text-area, .webchat__send-box-text-box__input, .webchat__send-box textarea, .webchat__send-box input[type='text']");
     for (var i = 0; i < all.length; i++) if (all[i].offsetParent !== null) return all[i];
     return all[0] || null;
   }
@@ -60,10 +60,15 @@
   api.send = function (text) {
     var box = visibleBox();
     if (!box) return false;
-    var proto = box.tagName === "TEXTAREA" ? root.HTMLTextAreaElement : root.HTMLInputElement;
-    var desc = proto && Object.getOwnPropertyDescriptor(proto.prototype, "value");
-    if (desc && desc.set) desc.set.call(box, text); else box.value = text;
-    box.dispatchEvent(new root.Event("input", { bubbles: true }));
+    var s = cur();
+    if (s && s.store && typeof s.store.dispatch === "function") {
+      s.store.dispatch({ type: "WEB_CHAT/SET_SEND_BOX", payload: { text: text } });
+    } else {
+      var proto = box.tagName === "TEXTAREA" ? root.HTMLTextAreaElement : root.HTMLInputElement;
+      var desc = proto && Object.getOwnPropertyDescriptor(proto.prototype, "value");
+      if (desc && desc.set) desc.set.call(box, text); else box.value = text;
+      box.dispatchEvent(new root.Event("input", { bubbles: true }));
+    }
     var scope = (box.closest && box.closest(".webchat__send-box")) || root.document;
     var btn = scope.querySelector(".webchat__send-button");
     setTimeout(function () {

@@ -52,6 +52,7 @@ window.AGENT_WEBCHAT_CONFIG = {
   userMarkdown: true,         // web/gfm.js - your prompts rendered as Markdown in a blue theme (false = plain text) (#56b)
   agentColors: true,          // web/gfm.css - one background tint per agent column in group chat (#56c)
   codeCopyButtons: true,      // web/gfm.js - Copy button on every code block (TODO #58)
+  codeHighlight: true,        // web/gfm.js - GitHub colours for code with a language (web/vendor/highlight.min.js, loaded on first use)
 
   // Session panel (ⓘ) links - private repos, links only work for people with access
   logTimeZone: "Asia/Kolkata",

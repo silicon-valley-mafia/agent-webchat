@@ -13,8 +13,13 @@
  *     markdown.js, gfm.js, app.js), so History looks like the chat.
  * Safety: everything is HTML-escaped first; raw HTML in Markdown is shown as text; links only http(s) / mailto;
  * images are shown as links (no outside image loads).
+ * (f) GitHub extras: code colours (highlight.js 11, served from web/vendor/, loaded only when a code block with a
+ *     language appears; GitHub's light / dark colours in gfm.css; blocks without a language stay plain, like GitHub),
+ *     alert boxes ("> [!NOTE]", TIP, IMPORTANT, WARNING, CAUTION), task-list checkboxes in agent replies, and common
+ *     emoji shortcodes (:rocket:) in prompts and History.
  * Off switches (web/config.js): gfmMarkdown: false (all of it), userMarkdown: false (plain prompts),
- * agentColors: false (no group tints), codeCopyButtons: false. Console: AgentGfm.render("**hi**"), AgentGfm.scan().
+ * agentColors: false (no group tints), codeCopyButtons: false, codeHighlight: false.
+ * Console: AgentGfm.render("**hi**"), AgentGfm.scan().
  */
 (function (root) {
   "use strict";
@@ -32,6 +37,26 @@
   function anchor(url, html, title) {
     return '<a href="' + esc(url) + '" target="_blank" rel="noopener noreferrer nofollow"' + (title ? ' title="' + esc(title) + '"' : "") + ">" + html + "</a>";
   }
+
+  /** Common GitHub emoji shortcodes (:rocket: -> 🚀). Unknown codes stay as typed. */
+  var EMOJI = {
+    "+1": "👍", "-1": "👎", thumbsup: "👍", thumbsdown: "👎", smile: "😄", grin: "😁", joy: "😂", laughing: "😆", wink: "😉",
+    slightly_smiling_face: "🙂", thinking: "🤔", heart: "❤️", tada: "🎉", rocket: "🚀", fire: "🔥", eyes: "👀", sparkles: "✨",
+    star: "⭐", zap: "⚡", bug: "🐛", bulb: "💡", memo: "📝", pencil2: "✏️", art: "🎨", wrench: "🔧", hammer: "🔨",
+    package: "📦", books: "📚", book: "📖", calendar: "📅", clipboard: "📋", pushpin: "📌", link: "🔗", lock: "🔒", unlock: "🔓",
+    key: "🔑", construction: "🚧", hourglass: "⌛", hourglass_flowing_sand: "⏳", warning: "⚠️", white_check_mark: "✅",
+    heavy_check_mark: "✔️", ballot_box_with_check: "☑️", x: "❌", no_entry: "⛔", question: "❓", exclamation: "❗",
+    information_source: "ℹ️", recycle: "♻️", chart_with_upwards_trend: "📈", chart_with_downwards_trend: "📉", bar_chart: "📊",
+    ok_hand: "👌", wave: "👋", pray: "🙏", clap: "👏", muscle: "💪", "100": "💯", coffee: "☕", gear: "⚙️", mag: "🔍",
+    point_right: "👉", arrow_right: "➡️", arrow_left: "⬅️", arrow_up: "⬆️", arrow_down: "⬇️", new: "🆕", boom: "💥",
+    hammer_and_wrench: "🛠️", test_tube: "🧪", robot: "🤖", computer: "💻", floppy_disk: "💾", file_folder: "📁", inbox_tray: "📥",
+    outbox_tray: "📤", email: "📧", bell: "🔔", speech_balloon: "💬", red_circle: "🔴", green_circle: "🟢", yellow_circle: "🟡",
+    large_blue_circle: "🔵", white_circle: "⚪", black_circle: "⚫", rotating_light: "🚨", stop_sign: "🛑", heavy_plus_sign: "➕",
+    heavy_minus_sign: "➖", lipstick: "💄", truck: "🚚", globe_with_meridians: "🌐", triangular_flag_on_post: "🚩"
+  };
+  /** GitHub alert blocks: "> [!NOTE]" ... (title shown with GitHub's wording). */
+  var ALERTS = { note: "\u24d8 Note", tip: "\uD83D\uDCA1 Tip", important: "\u2757 Important", warning: "\u26a0\ufe0f Warning", caution: "\u26d4 Caution" };
+  var ALERT_RE = /^\s*\[!(NOTE|TIP|IMPORTANT|WARNING|CAUTION)\]\s*$/i;
 
   /** Inline Markdown -> HTML. opts.breaks (default true): a single newline is a line break, like GitHub comments. */
   function inline(src, opts) {
@@ -67,6 +92,7 @@
       });
     }
     s = esc(s);
+    s = s.replace(/:([a-z0-9_+-]{1,40}):/g, function (m, k) { return EMOJI.hasOwnProperty(k) ? EMOJI[k] : m; });
     s = s.replace(/\*\*(?=\S)([\s\S]*?\S)\*\*/g, "<strong>$1</strong>")
       .replace(/(^|[^\w])__(?=\S)([\s\S]*?\S)__(?!\w)/g, "$1<strong>$2</strong>")
       .replace(/(^|[^*])\*(?=[^\s*])([^*\n]*?[^\s*])\*(?!\*)/g, "$1<em>$2</em>")
@@ -200,7 +226,14 @@
       if (RE.quote.test(l)) {
         var q = [];
         while (i < n && !blank(lines[i]) && (RE.quote.test(lines[i]) || !startsBlock(lines, i))) { q.push(lines[i].replace(RE.quote, "")); i++; }
-        out.push("<blockquote>" + blocks(q, { history: opts.history }) + "</blockquote>");
+        var al = ALERT_RE.exec(q[0] || "");
+        if (al && q.length > 1) {
+          var kind = al[1].toLowerCase();
+          out.push('<div class="markdown-alert markdown-alert-' + kind + '"><p class="markdown-alert-title">' + ALERTS[kind] + "</p>" +
+            blocks(q.slice(1), { history: opts.history }) + "</div>");
+        } else {
+          out.push("<blockquote>" + blocks(q, { history: opts.history }) + "</blockquote>");
+        }
         continue;
       }
       if (isTableStart(lines, i)) {
@@ -263,7 +296,34 @@
     return t;
   }
 
-  var api = { esc: esc, inline: inline, render: render, renderPrompt: renderPrompt, splitPrompt: splitPrompt, codeText: codeText, safeUrl: safeUrl };
+  /** Languages of the fenced code blocks in a Markdown text, in order ("" = no language). */
+  function fenceLangs(md) {
+    var out = [], open = null;
+    String(md == null ? "" : md).replace(/\r\n?/g, "\n").split("\n").forEach(function (l) {
+      var m = /^\s{0,12}(`{3,}|~{3,})\s*([^\s`]*)/.exec(l);
+      if (!m) return;
+      if (open) { if (m[1][0] === open[0] && m[1].length >= open.length && !m[2]) open = null; return; }
+      open = m[1];
+      out.push((m[2] || "").replace(/[^\w+#.-]/g, "").toLowerCase());
+    });
+    return out;
+  }
+  /** Colours one code block with highlight.js (GitHub colours in gfm.css). Plain text stays plain, like on GitHub. */
+  function highlight(code, lang, hljs) {
+    var text = code.textContent;
+    if (code.__awHl === text + "\u0000" + lang) return false;
+    code.__awHl = text + "\u0000" + lang;
+    if (!hljs || !lang || !hljs.getLanguage(lang)) return false;
+    var html;
+    try { html = hljs.highlight(text, { language: lang, ignoreIllegals: true }).value; } catch (e) { return false; }
+    code.innerHTML = html; // highlight.js escapes the text itself
+    code.__awHl = code.textContent + "\u0000" + lang;
+    if (code.classList) code.classList.add("hljs");
+    return true;
+  }
+
+  var api = { esc: esc, inline: inline, render: render, renderPrompt: renderPrompt, splitPrompt: splitPrompt, codeText: codeText, safeUrl: safeUrl,
+    fenceLangs: fenceLangs, highlight: highlight, EMOJI: EMOJI };
   root.AgentGfm = api;
   if (cfg.gfmMarkdown === false) return;
 
@@ -281,16 +341,106 @@
   if (cfg.agentColors !== false) de.classList.add("aw-agentcolors");
 
   /* ---------- DOM pass ---------- */
-  function rawOf(shown) {
+  function rawOf(shown, fromUser) {
     // prefer the exact text from the store (keeps indentation and line breaks); fall back to what is shown
     var a = root.__agentWebchat, s = a && a.cur ? a.cur() : null, st = s && s.store;
     if (st && root.AgentTime && root.AgentTime.match) {
       try {
-        var act = root.AgentTime.match(st.getState().activities || [], shown, true, null);
-        if (act && typeof act.text === "string") return act.text;
+        var act = root.AgentTime.match(st.getState().activities || [], shown, fromUser !== false, null);
+        if (act && typeof act.text === "string") {
+          var orig = act.channelData && act.channelData.awOriginalText;
+          return typeof orig === "string" ? orig : act.text;
+        }
       } catch (e) {}
     }
-    return shown;
+    return fromUser === false ? null : shown;
+  }
+
+  /* agent replies: Web Chat renders the Markdown; add what its renderer lacks (alerts, task lists, code colours) */
+  function firstText(el) {
+    var n = el && el.firstChild;
+    while (n && n.nodeType === 3 && !/\S/.test(n.data)) n = n.nextSibling;
+    return n && n.nodeType === 3 ? n : null;
+  }
+  function alerts(scope) {
+    Array.prototype.forEach.call(scope.querySelectorAll(".webchat__render-markdown blockquote:not(.markdown-alert)"), function (bq) {
+      var p = bq.firstElementChild, t = p && p.tagName === "P" ? firstText(p) : null;
+      var m = t && /^\s*\[!(NOTE|TIP|IMPORTANT|WARNING|CAUTION)\]\s*/i.exec(t.data);
+      if (!m) return;
+      var kind = m[1].toLowerCase();
+      t.data = t.data.slice(m[0].length);
+      if (!t.data && t.nextSibling && t.nextSibling.nodeName === "BR") p.removeChild(t.nextSibling);
+      if (!p.textContent.trim() && !p.querySelector("*:not(br)")) p.remove();
+      var title = doc.createElement("p");
+      title.className = "markdown-alert-title";
+      title.textContent = ALERTS[kind];
+      bq.insertBefore(title, bq.firstChild);
+      bq.classList.add("markdown-alert", "markdown-alert-" + kind);
+    });
+  }
+  function taskLists(scope) {
+    Array.prototype.forEach.call(scope.querySelectorAll(".webchat__render-markdown li:not(.task-list-item)"), function (li) {
+      var host = li.firstElementChild && li.firstElementChild.tagName === "P" && !firstText(li) ? li.firstElementChild : li;
+      var t = firstText(host), m = t && /^\s*\[([ xX])\]\s+/.exec(t.data);
+      if (!m) return;
+      t.data = t.data.slice(m[0].length);
+      var box = doc.createElement("input");
+      box.type = "checkbox"; box.disabled = true; box.checked = m[1] !== " ";
+      host.insertBefore(box, t);
+      host.insertBefore(doc.createTextNode(" "), t);
+      li.classList.add("task-list-item");
+      if (li.parentNode && li.parentNode.classList) li.parentNode.classList.add("contains-task-list");
+    });
+  }
+  var hlState = 0; // 0 = not loaded, 1 = loading, 2 = ready, 3 = failed
+  function loadHljs() {
+    if (root.hljs) { hlState = 2; return true; }
+    if (hlState) return false;
+    hlState = 1;
+    var s = doc.createElement("script");
+    s.src = cfg.highlightSrc || "vendor/highlight.min.js";
+    s.async = true;
+    s.onload = function () { hlState = root.hljs ? 2 : 3; schedule(); };
+    s.onerror = function () { hlState = 3; };
+    (doc.head || doc.documentElement).appendChild(s);
+    return false;
+  }
+  function langOf(code) {
+    var m = /(?:^|\s)language-([\w+#.-]+)/.exec(code.className || "");
+    return m ? m[1].toLowerCase() : "";
+  }
+  function colourCode(scope) {
+    if (cfg.codeHighlight === false) return 0;
+    var n = 0, ready = null;
+    // agent replies: language from the code's class, else from the fences in the raw reply text (same order)
+    Array.prototype.forEach.call(scope.querySelectorAll(".webchat__bubble:not(.webchat__bubble--from-user) .webchat__bubble__content"), function (c) {
+      var pres = c.querySelectorAll("pre");
+      if (!pres.length) return;
+      var langs = c.__awLangs || null;
+      Array.prototype.forEach.call(pres, function (pre, k) {
+        var code = pre.querySelector("code");
+        if (!code) return;
+        var lang = langOf(code);
+        if (!lang) {
+          if (langs === null) {
+            var raw = rawOf(c.innerText || c.textContent || "", false);
+            langs = raw == null ? [] : (c.__awLangs = fenceLangs(raw));
+          }
+          lang = langs[k] || "";
+        }
+        if (lang && !pre.getAttribute("data-lang")) pre.setAttribute("data-lang", lang);
+        if (!lang) return;
+        if (ready === null) ready = loadHljs();
+        if (ready && highlight(code, lang, root.hljs)) n++;
+      });
+    });
+    // our own Markdown (prompts, History): the renderer already put language-xxx on the code
+    Array.prototype.forEach.call(scope.querySelectorAll(".aw-md pre > code[class*='language-'], #historybody pre > code[class*='language-']"), function (code) {
+      if (code.closest && code.closest(".aw-src")) return;
+      if (ready === null) ready = loadHljs();
+      if (ready && highlight(code, langOf(code), root.hljs)) n++;
+    });
+    return n;
   }
   function prompts(scope) {
     var n = 0;
@@ -338,7 +488,10 @@
   function scan() {
     var n = 0;
     if (cfg.userMarkdown !== false) n += prompts(doc);
+    alerts(doc);
+    taskLists(doc);
     n += copyButtons(doc);
+    n += colourCode(doc);
     return n;
   }
   api.scan = scan;

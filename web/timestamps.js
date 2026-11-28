@@ -114,7 +114,9 @@
       var b = bubbles.length ? bubbles[bubbles.length - 1] : null;
       if (!b) return;
       var c = b.querySelector(".webchat__bubble__content") || b;
-      var a = match(acts, c.innerText || c.textContent, b.classList.contains("webchat__bubble--from-user"), used);
+      // #56: a prompt rendered by gfm.js keeps its raw text on the bubble (the folded header changes the visible text)
+      var shown = typeof b.__awRaw === "string" ? b.__awRaw : (c.innerText || c.textContent);
+      var a = match(acts, shown, b.classList.contains("webchat__bubble--from-user"), used);
       if (!a) return;
       used[a.id] = true;
       var text = format(a.timestamp);

@@ -113,6 +113,56 @@ test("History renderer swap and off switch", () => {
   assert.equal(typeof off.AgentGfm.render, "function", "helpers still exported");
 });
 
+test("GitHub alerts: > [!NOTE] ... becomes a coloured box; a lone marker or unknown kind stays a quote", () => {
+  assert.equal(r("> [!WARNING]\n> Do **not** push to main."),
+    '<div class="markdown-alert markdown-alert-warning"><p class="markdown-alert-title">\u26a0\ufe0f Warning</p><p>Do <strong>not</strong> push to main.</p></div>');
+  assert.ok(r("> [!note]\n> x").startsWith('<div class="markdown-alert markdown-alert-note"><p class="markdown-alert-title">\u24d8 Note</p>'));
+  for (const k of ["TIP", "IMPORTANT", "CAUTION"]) assert.ok(r(`> [!${k}]\n> x`).includes("markdown-alert-" + k.toLowerCase()));
+  assert.equal(r("> [!NOTE]"), "<blockquote><p>[!NOTE]</p></blockquote>");
+  assert.equal(r("> [!DANGER]\n> x"), "<blockquote><p>[!DANGER]<br>\nx</p></blockquote>");
+});
+
+test("emoji shortcodes: known ones replaced, unknown and code spans untouched, times safe", () => {
+  assert.equal(r("ship it :rocket: :tada:"), "<p>ship it \uD83D\uDE80 \uD83C\uDF89</p>");
+  assert.equal(r(":not_an_emoji: and `:rocket:`"), "<p>:not_an_emoji: and <code>:rocket:</code></p>");
+  assert.equal(r("at 10:30:45 :+1:"), "<p>at 10:30:45 \uD83D\uDC4D</p>");
+});
+
+test("fenceLangs: languages of fenced blocks in order, closing fences ignored", () => {
+  const L = (s) => [...G.fenceLangs(s)]; // arrays from the vm context
+  assert.deepEqual(L("a\n```verilog\nmodule x;\n```\ntext\n```\nplain\n```\n  ~~~ Python\nx\n  ~~~\n```json\n{}\n```"),
+    ["verilog", "", "python", "json"]);
+  assert.deepEqual(L("````md\n```js\ninner\n```\n````"), ["md"], "a longer fence wraps a shorter one");
+  assert.deepEqual(L(null), []);
+});
+
+test("code colours: vendored highlight.js (incl. verilog / tcl) + highlight() on a code element", () => {
+  const src = fs.readFileSync(new URL("../../web/vendor/highlight.min.js", import.meta.url), "utf8");
+  assert.match(src.slice(0, 600), /Highlight\.js v11\.\d+\.\d+/);
+  assert.match(src.slice(0, 600), /BSD/);
+  const ctx = vm.createContext({});
+  vm.runInContext(src, ctx, { filename: "highlight.min.js" });
+  const hljs = ctx.hljs;
+  for (const l of ["verilog", "sv", "vhdl", "tcl", "python", "bash", "json", "yaml", "javascript", "c", "cpp", "powershell", "dockerfile", "matlab", "makefile"]) {
+    assert.ok(hljs.getLanguage(l), "language " + l);
+  }
+  const mk = (text) => { const el = { textContent: text, cls: [], classList: { add: (c) => el.cls.push(c) } }; return el; };
+  const code = mk("module top(input a); // c\nendmodule");
+  assert.equal(G.highlight(code, "verilog", hljs), true);
+  assert.match(code.innerHTML, /<span class="hljs-keyword">module<\/span>/);
+  assert.match(code.innerHTML, /<span class="hljs-comment">\/\/ c<\/span>/);
+  assert.deepEqual(code.cls, ["hljs"]);
+  assert.equal(G.highlight(code, "verilog", hljs), false, "same text + language: not redone");
+  const evil = mk('x = "<img src=x onerror=alert(1)>"');
+  G.highlight(evil, "python", hljs);
+  assert.ok(!evil.innerHTML.includes("<img"), "code text stays escaped");
+  const plain = mk("just text");
+  assert.equal(G.highlight(plain, "", hljs), false, "no language = plain, like GitHub");
+  assert.equal(plain.innerHTML, undefined);
+  assert.equal(G.highlight(mk("x"), "no-such-lang", hljs), false);
+  assert.equal(G.highlight(mk("x"), "python", null), false, "library not loaded yet");
+});
+
 // TODO #57: posting time next to "... ago" (web/timestamps.js short()).
 function loadTime(cfg = {}) {
   const window = { AGENT_WEBCHAT_CONFIG: cfg };

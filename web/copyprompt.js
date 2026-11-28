@@ -85,7 +85,11 @@
   };
 
   function contentOf(b) { return b.querySelector(".webchat__bubble__content") || b; }
-  function typedText(b) { return api.stripHeader(contentOf(b).innerText || contentOf(b).textContent || ""); }
+  function typedText(b) {
+    // #56: gfm.js renders the prompt and keeps the raw text on the bubble
+    if (typeof b.__awRaw === "string") return api.stripHeader(b.__awRaw);
+    return api.stripHeader(contentOf(b).innerText || contentOf(b).textContent || "");
+  }
 
   function btn(label, title, onClick) {
     var x = root.document.createElement("button");

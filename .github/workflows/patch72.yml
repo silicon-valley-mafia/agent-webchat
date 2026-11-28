@@ -1,0 +1,21 @@
+name: one-shot patch72
+on:
+  push:
+    branches: [fix/tool-bars-layout]
+    paths: ['.github/workflows/patch72.yml']
+permissions:
+  contents: write
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: |
+          cat .github/p72/add.css >> web/gfm.css
+          tail -n 14 web/gfm.css
+          git rm -rq .github/p72
+          git config user.name 'Deepesh J'
+          git config user.email '263164968+silicon-valley-mafia@users.noreply.github.com'
+          git add web/gfm.css
+          git commit -m 'fix(ui): tool bars stay compact at the top of tall messages (no tall empty Copy / Reuse boxes); padding inside rendered prompts'
+          git push

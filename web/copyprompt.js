@@ -15,6 +15,9 @@
   var api = {};
   var HEAD = "[session header]\n";
   var END = "\n[end of header]";
+  /** Send box: multi-line (multilineInput: true, Web Chat 4.19 textarea) or single-line input. */
+  var BOX_SEL = ".webchat__send-box-text-box__html-text-area, .webchat__send-box-text-box__input, .webchat__send-box textarea, .webchat__send-box input[type='text']";
+  api.BOX_SEL = BOX_SEL;
 
   /** Pure: the text the person typed, without a #51 session header block on top. */
   function stripHeader0(text) {
@@ -59,7 +62,7 @@
   /** The send box of the chat that contains this bubble (or the first visible one). */
   function sendBox(bubble) {
     var doc = root.document;
-    var sel = ".webchat__send-box-text-box__input";
+    var sel = BOX_SEL;
     var n = bubble;
     while (n && n !== doc.body) {
       if (n.querySelector) {
@@ -82,6 +85,18 @@
     box.focus();
     try { box.setSelectionRange(text.length, text.length); } catch (e) {}
     return true;
+  };
+
+  /** Reuse: the typed text into the open chat's send box through Web Chat's store (like the File button), else the DOM box. */
+  api.reuse = function (bubble) {
+    var text = typedText(bubble), box = sendBox(bubble);
+    var a = root.__agentWebchat, s = a && a.cur ? a.cur() : null;
+    if (s && s.store && typeof s.store.dispatch === "function") {
+      s.store.dispatch({ type: "WEB_CHAT/SET_SEND_BOX", payload: { text: text } });
+      if (box) setTimeout(function () { try { box.focus(); box.setSelectionRange(text.length, text.length); } catch (e) {} }, 0);
+      return true;
+    }
+    return api.fill(box, text);
   };
 
   function contentOf(b) { return b.querySelector(".webchat__bubble__content") || b; }
@@ -113,7 +128,7 @@
       bar.className = "aw-ptools";
       (function (bubble) {
         bar.appendChild(btn("Copy", "Copy this prompt", function (x) { api.copy(typedText(bubble), x); }));
-        bar.appendChild(btn("Reuse", "Put this prompt back in the send box", function () { api.fill(sendBox(bubble), typedText(bubble)); }));
+        bar.appendChild(btn("Reuse", "Put this prompt back in the send box", function () { api.reuse(bubble); }));
       })(b);
       b.appendChild(bar);
       added++;

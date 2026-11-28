@@ -74,3 +74,6 @@ test("time: format gives date, time with seconds and zone", () => {
   assert.match(s, /GMT\+5:30|IST/);
   assert.equal(T.format("not a date"), "");
 });
+
+// TODO #56 / #57 / #58 tests live in gfm.test.js; imported here so the CI test list stays unchanged.
+import "./gfm.test.js";

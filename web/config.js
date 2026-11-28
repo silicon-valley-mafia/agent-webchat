@@ -22,7 +22,8 @@ window.AGENT_WEBCHAT_CONFIG = {
   expandedRecentReplies: 3,   // the latest N agent replies are shown in full; older long ones are collapsed
   escapeAngleBrackets: true,  // show "<id>"-style text in replies instead of letting it vanish
   exactTimeOnHover: true,     // web/timestamps.js - hover "5 minutes ago" to see the exact date and time (TODO #36)
-  timestampMode: "relative",  // "relative" ("5 minutes ago", exact time on hover) or "absolute" (exact time always shown)
+  timestampMode: "both",      // "both" = "03:05 · 8 minutes ago" (TODO #57), "relative" = only "5 minutes ago", "absolute" = Web Chat's exact time
+  timeFormat: "",             // "" = browser locale, "24h" or "12h" for the time shown on messages (#57)
 
   // Agent turns, multiple agents, Stop (each feature lives in its own file; false = old behaviour)
   multiAgent: true,           // web/agents.js - agent picker when the Worker offers 2+ agents (docs/AGENTS.md)
@@ -47,6 +48,10 @@ window.AGENT_WEBCHAT_CONFIG = {
   planBoard: true,            // web/planboard.js - task table + "Run next task" for YAML plans in replies (TODO #46)
   planBoardAgents: ["conductor"], // agents with the plan board (the Worker can also mark one with "plans": true)
   historyFilter: true,        // web/historyfilter.js - filter History by agent (TODO #20)
+  gfmMarkdown: true,          // web/gfm.js - GitHub-style Markdown look for replies, prompts and History (TODO #56)
+  userMarkdown: true,         // web/gfm.js - your prompts rendered as Markdown in a blue theme (false = plain text) (#56b)
+  agentColors: true,          // web/gfm.css - one background tint per agent column in group chat (#56c)
+  codeCopyButtons: true,      // web/gfm.js - Copy button on every code block (TODO #58)
 
   // Session panel (ⓘ) links - private repos, links only work for people with access
   logTimeZone: "Asia/Kolkata",

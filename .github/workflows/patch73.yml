@@ -1,0 +1,23 @@
+name: one-shot patch73
+on:
+  push:
+    branches: [fix/56-match-raw]
+    paths: ['.github/workflows/patch73.yml']
+permissions:
+  contents: write
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: python3 .github/p73/patch73.py
+      - run: |
+          git rm -rq .github/p73
+          git config user.name 'Deepesh J'
+          git config user.email '263164968+silicon-valley-mafia@users.noreply.github.com'
+          git add -A web worker
+          git commit -m 'fix(#56): prompts use the stored text (session header, line breaks), agent replies find their fence languages; tests from the 07:00 IST log'
+          git push

@@ -1,0 +1,95 @@
+/* agent-webchat: GitHub-like look for Markdown (TODO #56), code copy buttons (#58), group chat tints (#56c).
+ * Used by web/gfm.js (classes on <html>: aw-gfm, aw-usermd, aw-agentcolors). Colours follow GitHub's Primer palette. */
+html.aw-gfm {
+  --aw-b: #d0d7de; --aw-zebra: #f6f8fa; --aw-code: rgba(175, 184, 193, .2); --aw-pre: #f6f8fa; --aw-muted: #59636e;
+  --aw-u-bg: #ddf4ff; --aw-u-border: #54aeff; --aw-u-text: #0b1f33; --aw-u-pre: rgba(255, 255, 255, .65); --aw-u-b: #9cd1ff;
+}
+html.aw-gfm[data-theme="dark"] {
+  --aw-b: #3d444d; --aw-zebra: #151b23; --aw-code: rgba(101, 108, 118, .2); --aw-pre: #151b23; --aw-muted: #9198a1;
+  --aw-u-bg: #0c2d4a; --aw-u-border: #1f6feb; --aw-u-text: #e6edf3; --aw-u-pre: rgba(1, 4, 9, .45); --aw-u-b: #1f4f86;
+}
+
+/* ---------- Markdown blocks: agent replies (Web Chat's renderer), prompts and History (gfm.js) ---------- */
+.aw-gfm .webchat__render-markdown, .aw-md { line-height: 1.5; overflow-wrap: anywhere; }
+.aw-gfm .webchat__render-markdown > :first-child, .aw-md > :first-child { margin-top: 0; }
+.aw-gfm .webchat__render-markdown > :last-child, .aw-md > :last-child { margin-bottom: 0; }
+.aw-gfm .webchat__render-markdown :is(p, ul, ol, table, pre, blockquote), .aw-md :is(p, ul, ol, table, pre, blockquote) { margin: 0 0 10px; }
+.aw-gfm .webchat__render-markdown :is(h1, h2, h3, h4, h5, h6), .aw-md :is(h1, h2, h3, h4, h5, h6) { margin: 14px 0 8px; font-weight: 600; line-height: 1.25; }
+.aw-gfm .webchat__render-markdown :is(h1, h2), .aw-md :is(h1, h2) { padding-bottom: .3em; border-bottom: 1px solid var(--aw-b); }
+.aw-gfm .webchat__render-markdown h1, .aw-md h1 { font-size: 1.5em; }
+.aw-gfm .webchat__render-markdown h2, .aw-md h2 { font-size: 1.3em; }
+.aw-gfm .webchat__render-markdown h3, .aw-md h3 { font-size: 1.12em; }
+.aw-gfm .webchat__render-markdown :is(ul, ol), .aw-md :is(ul, ol) { padding-left: 2em; }
+.aw-gfm .webchat__render-markdown li + li, .aw-md li + li { margin-top: .25em; }
+.aw-gfm .webchat__render-markdown li > :is(ul, ol), .aw-md li > :is(ul, ol) { margin: .25em 0 0; }
+.aw-md ul.contains-task-list { list-style: none; padding-left: 1.2em; }
+.aw-md .task-list-item input { margin: 0 .3em 0 -1.2em; vertical-align: middle; }
+.aw-gfm .webchat__render-markdown table, .aw-md table { display: block; max-width: 100%; width: max-content; overflow: auto; border-collapse: collapse; border-spacing: 0; }
+.aw-gfm .webchat__render-markdown :is(th, td), .aw-md :is(th, td) { padding: 6px 13px; border: 1px solid var(--aw-b); }
+.aw-gfm .webchat__render-markdown th, .aw-md th { font-weight: 600; }
+.aw-gfm .webchat__render-markdown tr:nth-child(2n), .aw-md tbody tr:nth-child(2n) { background: var(--aw-zebra); }
+.aw-gfm .webchat__render-markdown code, .aw-md code {
+  font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace; font-size: 85%;
+  padding: .2em .4em; border-radius: 6px; background: var(--aw-code);
+}
+.aw-gfm .webchat__render-markdown pre, .aw-md pre {
+  position: relative; padding: 12px 14px; border-radius: 6px; background: var(--aw-pre); overflow: auto; line-height: 1.45;
+  font-size: 85%; white-space: pre;
+}
+.aw-gfm .webchat__render-markdown pre code, .aw-md pre code { padding: 0; background: transparent; font-size: 100%; border-radius: 0; white-space: pre; }
+.aw-gfm .webchat__render-markdown blockquote, .aw-md blockquote { padding: 0 1em; color: var(--aw-muted); border-left: .25em solid var(--aw-b); }
+.aw-gfm .webchat__render-markdown hr, .aw-md hr { height: .25em; padding: 0; margin: 16px 0; border: 0; background: var(--aw-b); }
+.aw-gfm .webchat__render-markdown del, .aw-md del { opacity: .75; }
+
+/* ---------- your prompts: GitHub rendering on a blue tint (#56b); High contrast keeps its own colours ---------- */
+.aw-src { display: none !important; }
+html.aw-usermd:not([data-skin="contrast"]) .webchat__bubble--from-user .webchat__bubble__content {
+  background: var(--aw-u-bg) !important; color: var(--aw-u-text) !important; border: 1px solid var(--aw-u-border) !important;
+}
+.aw-prompt { text-align: left; }
+html:not([data-skin="contrast"]) .aw-prompt pre, html:not([data-skin="contrast"]) .aw-prompt :is(tr:nth-child(2n)) { background: var(--aw-u-pre); }
+html:not([data-skin="contrast"]) .aw-prompt :is(th, td, h1, h2) { border-color: var(--aw-u-b); }
+.aw-prompt .aw-hdr { margin: 0 0 6px; font-size: 12px; opacity: .75; }
+.aw-prompt .aw-hdr summary { cursor: pointer; }
+.aw-prompt .aw-hdr pre { margin: 4px 0 0; white-space: pre-wrap; }
+.aw-prompt .aw-routechip {
+  display: inline-block; margin: 0 0 6px; padding: 0 8px; border: 1px solid currentColor; border-radius: 9px; font-size: 11px; opacity: .8;
+}
+
+/* ---------- #58 copy button on code blocks ---------- */
+.aw-codecopy {
+  position: absolute; top: 6px; right: 6px; z-index: 1; padding: 2px 8px; border-radius: 6px; border: 1px solid var(--aw-b, #d0d7de);
+  background: var(--aw-zebra, #f6f8fa); color: inherit; font: 12px/1.4 system-ui, sans-serif; cursor: pointer; opacity: 0; transition: opacity .15s;
+}
+.aw-codecopy::after { content: "\1F4CB  Copy"; }
+.aw-codecopy.done::after { content: "\2713  Copied"; }
+pre.aw-haspre:hover .aw-codecopy, .aw-codecopy:focus-visible, .aw-codecopy.done { opacity: 1; }
+@media (hover: none) { .aw-codecopy { opacity: .85; } }
+pre.aw-haspre { position: relative; }
+pre[data-lang]::before {
+  content: attr(data-lang); position: absolute; top: 6px; right: 86px; font: 11px/1.9 system-ui, sans-serif; opacity: .55; pointer-events: none;
+}
+
+/* ---------- #56c group chat: one tint per agent column (by column number) ---------- */
+html.aw-agentcolors .gcol { --aw-a: #d4a72c; --aw-t: #fff8c5; }
+html.aw-agentcolors .gcol[data-i="1"] { --aw-a: #2da44e; --aw-t: #dafbe1; }
+html.aw-agentcolors .gcol[data-i="2"] { --aw-a: #8250df; --aw-t: #fbefff; }
+html.aw-agentcolors .gcol[data-i="3"] { --aw-a: #cf222e; --aw-t: #ffebe9; }
+html.aw-agentcolors .gcol[data-i="4"] { --aw-a: #bc4c00; --aw-t: #fff1e5; }
+html.aw-agentcolors .gcol[data-i="5"] { --aw-a: #1b7c83; --aw-t: #d8f3f1; }
+html.aw-agentcolors[data-theme="dark"] .gcol { --aw-a: #d29922; --aw-t: #2e2a12; }
+html.aw-agentcolors[data-theme="dark"] .gcol[data-i="1"] { --aw-a: #3fb950; --aw-t: #12261e; }
+html.aw-agentcolors[data-theme="dark"] .gcol[data-i="2"] { --aw-a: #a371f7; --aw-t: #271a3a; }
+html.aw-agentcolors[data-theme="dark"] .gcol[data-i="3"] { --aw-a: #f85149; --aw-t: #33181b; }
+html.aw-agentcolors[data-theme="dark"] .gcol[data-i="4"] { --aw-a: #db6d28; --aw-t: #2f1d10; }
+html.aw-agentcolors[data-theme="dark"] .gcol[data-i="5"] { --aw-a: #39c5cf; --aw-t: #0d2a2c; }
+html.aw-agentcolors .gcol .ghead { box-shadow: inset 0 4px 0 var(--aw-a); background: var(--aw-t); }
+html.aw-agentcolors .gcol .webchat__bubble:not(.webchat__bubble--from-user) .webchat__bubble__content {
+  background: var(--aw-t) !important; border-color: var(--aw-a) !important;
+}
+html.aw-agentcolors #gtabs button:nth-child(1) { border-bottom: 3px solid #d4a72c; }
+html.aw-agentcolors #gtabs button:nth-child(2) { border-bottom: 3px solid #2da44e; }
+html.aw-agentcolors #gtabs button:nth-child(3) { border-bottom: 3px solid #8250df; }
+html.aw-agentcolors #gtabs button:nth-child(4) { border-bottom: 3px solid #cf222e; }
+html.aw-agentcolors #gtabs button:nth-child(5) { border-bottom: 3px solid #bc4c00; }
+html.aw-agentcolors #gtabs button:nth-child(6) { border-bottom: 3px solid #1b7c83; }

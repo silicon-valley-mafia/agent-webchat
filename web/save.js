@@ -1,7 +1,8 @@
 /* agent-webchat: TODO #57 "💾 Save" - save the whole conversation so far to GitHub as ONE Markdown file.
  *
  * - Sits next to ⬇ Download and shows / hides with it. One click -> POST /save {conversationId}; the Worker builds the
- *   same Markdown as ⬇ Download and writes it to the logs repo as saved/<the Download file name>.
+ *   same Markdown as ⬇ Download and commits it, under the Download file name, into this chat's own log folder
+ *   (logs/<agent>/<day>/<HHMM>-<person>--<conversation>/, next to its message files).
  * - Click again after chatting more -> the same file is overwritten with the whole conversation up to now
  *   (its git history keeps every earlier save). Nothing changed since the last save -> "unchanged", no new commit.
  * - The request names the conversation's agent (X-Agent, same rule as web/agents.js), so it reaches the right agent.
@@ -68,7 +69,7 @@
   b.type = "button";
   b.hidden = true;
   b.textContent = LABEL;
-  b.title = "Save the whole conversation so far to GitHub as one Markdown file (click again later to overwrite it)";
+  b.title = "Commit the whole conversation so far (the Download file) into this chat's log folder on GitHub - click again later to overwrite it";
 
   function sync() {
     var d = doc.getElementById("download");

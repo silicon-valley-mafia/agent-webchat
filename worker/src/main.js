@@ -25,8 +25,8 @@
  *   /token and /resume add {repos}; GET /health adds {config: "off"|"on"|"stale"|"error"}.
  *   #52 part 2: "repos.oldLogs" = older logs repos that History, transcripts and the #49 owner check also read;
  *   GET /health?repos=1 adds {repos: {logs, artifacts, oldLogs: [...]}} = can the tokens read them (true/false only).
- * 💾 Save (TODO #57, src/save.js): POST /save {conversationId} writes the ⬇ Download Markdown to the logs repo as
- *   saved/<Download file name>; every later click overwrites it with the whole conversation so far.
+ * 💾 Save (TODO #57, src/save.js): POST /save {conversationId} commits the ⬇ Download Markdown into the chat's own
+ *   log folder (<session folder>/<Download file name>); every later click overwrites it with the whole conversation.
  */
 import worker, { identify, rateLimited, json, people, slugify, oldLogRepos, createOnly, localParts, CONV_RE } from "./index.js";
 import { fileRequest } from "./repofile.js";

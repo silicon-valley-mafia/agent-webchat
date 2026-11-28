@@ -1,39 +1,40 @@
 /**
- * TODO #57 "💾 Save" button: the whole conversation so far as ONE Markdown file in the logs repo.
+ * TODO #57 "💾 Save" button: the whole conversation so far as ONE Markdown file, committed into that chat's own
+ * log folder.
  *
  *   POST /save {conversationId}  (main.js; same X-Access-Code / X-Agent / ownership rules as /export)
- *     -> builds exactly what ⬇ Download gives you (/export) and writes it to
- *          <SAVE_DIR>/<the Download file name>        e.g. saved/2_2026-11-27_1700-deepesh--Conv-9-in.md
- *        in LOG_REPO (LOG_BRANCH). Clicking again later OVERWRITES that file with the whole conversation up to then
- *        (one file per conversation, its git history keeps every earlier save).
- *     <- {saved:true, path, repo, branch, url, status:"created"|"updated"|"unchanged", commit, messages}
+ *     -> builds exactly what ⬇ Download gives you (/export) and writes it, under the Download file name, into the
+ *        chat's session folder in LOG_REPO (LOG_BRANCH), next to 0000-session.md and the message files:
+ *          logs/2/2026-11-27/1700-deepesh--Conv-9-in/2_2026-11-27_1700-deepesh--Conv-9-in.md
+ *        Clicking again later OVERWRITES that file with the whole conversation up to then (its git history keeps
+ *        every earlier save).
+ *     <- {saved:true, path, folder, repo, branch, url, status:"created"|"updated"|"unchanged", commit, messages}
  *
- * This is the one place the Worker updates a file instead of create-only: the per-message logs under logs/ are
- * untouched (still create-only). Parallel saves of the same conversation (two tabs, double click) never fail: a 409 /
- * 422 from GitHub (file changed under us) re-reads the current sha and writes again, up to SAVE_ATTEMPTS times.
- * Identical content is not committed again ("unchanged").
- * Vars: SAVE_DIR (default "saved"), SAVE_BUTTON = "off" turns /save off. Needs LOG_REPO + LOG_REPO_TOKEN (write).
+ * The message files in the folder stay create-only; this one file is the only thing the Worker updates. History
+ * ignores it (it isn't an NNNN-... file) and /transcript doesn't join it in. Parallel saves of the same conversation
+ * (two tabs, double click) never fail: a 409 / 422 from GitHub re-reads the current sha and writes again, up to
+ * SAVE_ATTEMPTS times. Identical content is not committed again ("unchanged").
+ * Var: SAVE_BUTTON = "off" turns /save off. Needs LOG_REPO + LOG_REPO_TOKEN (write).
  */
-import { contentsUrl, ghHeaders, b64utf8 } from "./index.js";
+import { contentsUrl, ghHeaders, b64utf8, parseSession } from "./index.js";
 
 export const SAVE_ATTEMPTS = 4;
 /** The /export file name: letters, digits, _ . - only, ends in .md (no folders, no ".."). */
 export const SAVE_NAME_RE = /^[A-Za-z0-9][A-Za-z0-9_.-]{0,199}\.md$/;
-const DIR_RE = /^[A-Za-z0-9_-]{1,40}(\/[A-Za-z0-9_-]{1,40}){0,3}$/;
 
 export function saveEnabled(env) {
   return !!(env.LOG_REPO && env.LOG_REPO_TOKEN) && String(env.SAVE_BUTTON || "").toLowerCase() !== "off";
 }
 
-export function saveDir(env) {
-  const d = String(env.SAVE_DIR || "saved").trim().replace(/^\/+|\/+$/g, "");
-  return DIR_RE.test(d) && !d.split("/").includes("..") ? d : "saved";
-}
-
-/** Repo path for an /export file name, or null when the name isn't safe. */
-export function savePath(env, filename) {
+/**
+ * <session folder>/<Download file name>, or null unless both are safe (a real session folder, a plain name).
+ * A name that starts like a message file (NNNN-..., only the old layout without an agent number) gets a
+ * "conversation_" prefix so History / transcripts never count it as a message.
+ */
+export function savePath(folder, filename) {
+  if (typeof folder !== "string" || !parseSession(folder)) return null;
   if (typeof filename !== "string" || !SAVE_NAME_RE.test(filename) || filename.includes("..")) return null;
-  return saveDir(env) + "/" + filename;
+  return folder + "/" + (/^\d{4}-/.test(filename) ? "conversation_" + filename : filename);
 }
 
 /** Message count from the /export header row "| Messages | N (...) |", or null. */
@@ -72,18 +73,19 @@ export async function overwriteFile(env, path, content, message) {
   return { error: "github_conflict" };
 }
 
-/** Writes an /export result ({markdown, filename}). -> the /save answer body, or {error, status}. */
+/** Writes an /export result ({markdown, filename, folder}). -> the /save answer body, or {error, status}. */
 export async function saveExport(env, exp, person) {
-  const path = savePath(env, exp && exp.filename);
+  const path = savePath(exp && exp.folder, exp && exp.filename);
   if (!path || typeof exp.markdown !== "string") return { error: "bad_export", status: 502 };
   const slug = (person && person.slug) || "user";
-  const r = await overwriteFile(env, path, exp.markdown, "save(" + slug + "): " + exp.filename);
+  const r = await overwriteFile(env, path, exp.markdown, "save(" + slug + "): " + exp.folder.slice(5) + " (whole conversation)");
   if (r.error) return { error: r.error, status: 502 };
   const branch = env.LOG_BRANCH || "main";
   return {
     saved: true,
     status: r.status,
     path,
+    folder: exp.folder,
     repo: env.LOG_REPO,
     branch,
     url: "https://github.com/" + env.LOG_REPO + "/blob/" + encodeURIComponent(branch) + "/" + path.split("/").map(encodeURIComponent).join("/"),
